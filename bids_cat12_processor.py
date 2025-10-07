@@ -20,6 +20,7 @@ import os
 import sys
 import argparse
 import logging
+from colorama import Fore, Style, init as colorama_init
 from pathlib import Path
 import json
 import yaml
@@ -38,6 +39,7 @@ from bids.exceptions import BIDSValidationError
 import click
 from tqdm import tqdm
 
+colorama_init(autoreset=True)
 # Import custom utilities
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 from bids_utils import BIDSValidator, BIDSSessionManager
@@ -71,16 +73,23 @@ def setup_logging(log_level: int, log_dir: Optional[Path] = None, log_name: Opti
 
     log_file_path = log_dir / log_name
 
+    from colorama import Fore, Style, init as colorama_init
+    colorama_init(autoreset=True)
+
+    # File handler: plain log, no logger name, no emoji/color
+    file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     file_handler = logging.FileHandler(log_file_path)
+    file_handler.setFormatter(file_formatter)
     handlers.append(file_handler)
 
+    # Console handler: emoji/color, no logger name
     if console:
-        handlers.append(logging.StreamHandler(sys.stdout))
-
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+        console_handler = logging.StreamHandler(sys.stdout)
+        # Simple formatter that just outputs the message (which already has color/emoji codes)
+        console_handler.setFormatter(logging.Formatter('%(message)s'))
+        handlers.append(console_handler)
 
     for handler in handlers:
-        handler.setFormatter(formatter)
         root_logger.addHandler(handler)
 
     root_logger.setLevel(log_level)
@@ -176,7 +185,7 @@ class BIDSLongitudinalProcessor:
     def _init_bids_layout(self):
         """Initialize BIDS layout with validation."""
         try:
-            logger.info(f"Initializing BIDS layout for: {self.bids_dir}")
+            logger.info(f"{Fore.CYAN}🔍 Initializing BIDS layout for: {self.bids_dir}{Style.RESET_ALL}")
             # Use a file-based database path to avoid SQLite URI issues
             import tempfile
             db_path = Path(tempfile.gettempdir()) / f"bidsdb_{hash(str(self.bids_dir))}.db"
@@ -186,11 +195,11 @@ class BIDSLongitudinalProcessor:
                 database_path=str(db_path),
                 reset_database=True
             )
-            logger.info(f"Found {len(self.layout.get_subjects())} subjects")
+            logger.info(f"{Fore.GREEN}👥 Found {len(self.layout.get_subjects())} subjects{Style.RESET_ALL}")
         except Exception as e:
-            logger.error(f"Failed to initialize BIDS layout: {e}")
+            logger.error(f"{Fore.RED}❌ Failed to initialize BIDS layout: {e}{Style.RESET_ALL}")
             import traceback
-            logger.error(traceback.format_exc())
+            logger.error(f"{Fore.RED}{traceback.format_exc()}{Style.RESET_ALL}")
             sys.exit(1)
     
     def validate_dataset(self) -> bool:
@@ -646,19 +655,19 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
     resolved_log_dir = log_dir if log_dir else (output_dir / 'logs')
     log_file_path = setup_logging(log_level, log_dir=resolved_log_dir)
 
-    logger.info("=" * 60)
-    logger.info("CAT12 BIDS App - Structural MRI Processing")
-    logger.info("=" * 60)
-    logger.info(f"BIDS directory: {bids_dir}")
-    logger.info(f"Output directory: {output_dir}")
+    logger.info(f"{Fore.MAGENTA}{'=' * 60}{Style.RESET_ALL}")
+    logger.info(f"{Fore.MAGENTA}🧠 CAT12 BIDS App - Structural MRI Processing{Style.RESET_ALL}")
+    logger.info(f"{Fore.MAGENTA}{'=' * 60}{Style.RESET_ALL}")
+    logger.info(f"{Fore.CYAN}📁 BIDS directory: {bids_dir}{Style.RESET_ALL}")
+    logger.info(f"{Fore.CYAN}📂 Output directory: {output_dir}{Style.RESET_ALL}")
     if work_dir:
-        logger.info(f"Working directory: {work_dir}")
-    logger.info(f"Analysis level: {analysis_level}")
-    logger.info(f"Log file: {log_file_path}")
+        logger.info(f"{Fore.CYAN}🗂️ Working directory: {work_dir}{Style.RESET_ALL}")
+    logger.info(f"{Fore.CYAN}🔬 Analysis level: {analysis_level}{Style.RESET_ALL}")
+    logger.info(f"{Fore.CYAN}📝 Log file: {log_file_path}{Style.RESET_ALL}")
     
     # Check if at least one processing stage is requested
     if not any([preproc, smooth_volume, smooth_surface, qa, tiv, roi]):
-        logger.error("No processing stages specified! Use at least one of: --preproc, --smooth-volume, --smooth-surface, --qa, --tiv, --roi")
+        logger.error(f"{Fore.RED}❌ No processing stages specified! Use at least one of: --preproc, --smooth-volume, --smooth-surface, --qa, --tiv, --roi{Style.RESET_ALL}")
         sys.exit(1)
     
     # Log processing stages
@@ -676,7 +685,7 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
     if roi:
         stages.append("ROI extraction")
     
-    logger.info("Processing stages: " + ", ".join(stages))
+    logger.info(f"{Fore.MAGENTA}🛠️  Processing stages: {', '.join(stages)}{Style.RESET_ALL}")
     
     # Initialize processor
     processor = BIDSLongitudinalProcessor(
@@ -725,9 +734,9 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
         if longitudinal_subjects:
             pilot_subject = random.choice(list(longitudinal_subjects.keys()))
             participant_labels = [f"sub-{pilot_subject}"]
-            logger.info(f"Pilot mode enabled: selected participant sub-{pilot_subject}")
+            logger.info(f"{Fore.YELLOW}🎯 Pilot mode enabled: selected participant sub-{pilot_subject}{Style.RESET_ALL}")
         else:
-            logger.warning("Pilot mode requested but no eligible subjects were found. Processing all subjects.")
+            logger.warning(f"{Fore.YELLOW}⚠️ Pilot mode requested but no eligible subjects were found. Processing all subjects.{Style.RESET_ALL}")
     
     if analysis_level == 'participant':
         # Run participant-level processing
@@ -761,26 +770,26 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
             )
         
         if qa:
-            logger.info("Running quality assessment stage...")
+            logger.info(f"{Fore.CYAN}🔎 Running quality assessment stage...{Style.RESET_ALL}")
             processor.run_quality_assessment(participant_labels=participant_labels)
         
         if tiv:
-            logger.info("Running TIV estimation stage...")
+            logger.info(f"{Fore.CYAN}🧮 Running TIV estimation stage...{Style.RESET_ALL}")
             processor.estimate_tiv(participant_labels=participant_labels)
         
         if roi:
-            logger.info("Running ROI extraction stage...")
+            logger.info(f"{Fore.CYAN}📊 Running ROI extraction stage...{Style.RESET_ALL}")
             processor.extract_roi_values(participant_labels=participant_labels)
         
-        logger.info("Participant-level processing completed")
+        logger.info(f"{Fore.GREEN}🏁 Participant-level processing completed{Style.RESET_ALL}")
     
     elif analysis_level == 'group':
-        logger.info("Group-level analysis not yet implemented")
+        logger.info(f"{Fore.MAGENTA}👥 Group-level analysis not yet implemented{Style.RESET_ALL}")
         # Future: group statistics, visualization, etc.
     
-    logger.info("=" * 60)
-    logger.info("Processing completed successfully!")
-    logger.info("=" * 60)
+    logger.info(f"{Fore.MAGENTA}{'=' * 60}{Style.RESET_ALL}")
+    logger.info(f"{Fore.GREEN}🎉 Processing completed successfully!{Style.RESET_ALL}")
+    logger.info(f"{Fore.MAGENTA}{'=' * 60}{Style.RESET_ALL}")
 
 
 if __name__ == '__main__':
