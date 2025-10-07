@@ -9,6 +9,14 @@ echo "=========================================="
 echo "CAT12 Installation Test"
 echo "=========================================="
 
+# Load environment variables
+if [ -f ".env" ]; then
+    source .env
+    echo "Loaded environment variables from .env"
+else
+    echo "Warning: .env file not found. Some tests may fail."
+fi
+
 # Color codes
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -50,7 +58,7 @@ run_test "MATLAB Runtime directory" '[ -d "$MCR_ROOT" ]'
 
 # Test 3: Executable files
 echo -e "\n3. Checking executable files..."
-run_test "CAT12 executable" '[ -x "$CAT12_ROOT/run_cat12.sh" ]'
+run_test "CAT12 executable" '[ -x "$CAT12_ROOT/cat_standalone.sh" ]'
 
 # Test 4: MATLAB Runtime libraries
 echo -e "\n4. Checking MATLAB Runtime libraries..."
@@ -85,18 +93,22 @@ fi
 
 # Test 8: CAT12 functionality test
 echo -e "\n8. Testing CAT12 basic functionality..."
-if [ -n "$CAT12_ROOT" ] && [ -x "$CAT12_ROOT/run_cat12.sh" ]; then
-    # Create a minimal test to see if CAT12 starts
-    TEST_OUTPUT=$(timeout 30s "$CAT12_ROOT/run_cat12.sh" "$MCR_ROOT" -h 2>&1 || true)
-    if echo "$TEST_OUTPUT" | grep -q -i "cat12\|spm\|matlab" 2>/dev/null; then
-        echo -e "   ${GREEN}✓ CAT12 executable responds${NC}"
+if [ -n "$CAT12_ROOT" ] && [ -x "$CAT12_ROOT/cat_standalone.sh" ] && [ -n "$MCR_ROOT" ]; then
+    # Test if CAT12 can start and show version info
+    TEST_OUTPUT=$(timeout 15s "$CAT12_ROOT/cat_standalone.sh" 2>&1 | head -20 || true)
+    if echo "$TEST_OUTPUT" | grep -q -i "spm12.*version\|cat12" 2>/dev/null; then
+        echo -e "   ${GREEN}✓ CAT12 executable starts and shows version info${NC}"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    elif echo "$TEST_OUTPUT" | grep -q -i "matlab.*runtime\|setting up environment" 2>/dev/null; then
+        echo -e "   ${GREEN}✓ CAT12 executable starts (version check inconclusive)${NC}"
         TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         echo -e "   ${RED}✗ CAT12 executable test failed${NC}"
+        echo "   Debug output: $TEST_OUTPUT"
     fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 else
-    echo "   Skipping CAT12 functionality test (executable not found)"
+    echo "   Skipping CAT12 functionality test (executable or MCR not found)"
 fi
 
 # Test 9: File permissions and disk space

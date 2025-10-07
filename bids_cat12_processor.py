@@ -26,6 +26,8 @@ import yaml
 from typing import Dict, List, Optional, Tuple
 import subprocess
 from datetime import datetime
+import gzip
+import shutil
 
 import pandas as pd
 import nibabel as nib
@@ -114,10 +116,20 @@ class BIDSLongitudinalProcessor:
         """Initialize BIDS layout with validation."""
         try:
             logger.info(f"Initializing BIDS layout for: {self.bids_dir}")
-            self.layout = BIDSLayout(self.bids_dir, validate=self.config['bids']['validate'])
+            # Use a file-based database path to avoid SQLite URI issues
+            import tempfile
+            db_path = Path(tempfile.gettempdir()) / f"bidsdb_{hash(str(self.bids_dir))}.db"
+            self.layout = BIDSLayout(
+                self.bids_dir, 
+                validate=self.config['bids']['validate'],
+                database_path=str(db_path),
+                reset_database=True
+            )
             logger.info(f"Found {len(self.layout.get_subjects())} subjects")
         except Exception as e:
             logger.error(f"Failed to initialize BIDS layout: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             sys.exit(1)
     
     def validate_dataset(self) -> bool:
@@ -163,6 +175,41 @@ class BIDSLongitudinalProcessor:
         logger.info(f"Dataset summary: {len(longitudinal_subjects)} longitudinal, {len(cross_sectional_subjects)} cross-sectional subjects")
         return all_subjects
     
+    def gunzip_file(self, gz_file: str, output_dir: Path) -> str:
+        """
+        Gunzip a .nii.gz file to .nii in the output directory.
+        
+        Args:
+            gz_file: Path to .nii.gz file
+            output_dir: Output directory for uncompressed file
+            
+        Returns:
+            Path to uncompressed .nii file
+        """
+        gz_path = Path(gz_file)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create output filename in the subject output directory
+        nii_filename = gz_path.name.replace('.nii.gz', '.nii')
+        nii_path = output_dir / nii_filename
+        
+        # Skip if already uncompressed
+        if nii_path.exists():
+            logger.debug(f"Uncompressed file already exists: {nii_path}")
+            return str(nii_path)
+        
+        logger.info(f"Gunzipping: {gz_path.name}")
+        try:
+            with gzip.open(gz_file, 'rb') as f_in:
+                with open(nii_path, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            logger.debug(f"Created: {nii_path}")
+            return str(nii_path)
+        except Exception as e:
+            logger.error(f"Failed to gunzip {gz_file}: {e}")
+            raise
+    
     def process_subject(self, subject: str, sessions: List[str]) -> bool:
         """
         Process a single subject with longitudinal data.
@@ -177,8 +224,13 @@ class BIDSLongitudinalProcessor:
         logger.info(f"Processing subject {subject} with sessions: {', '.join(sessions)}")
         
         try:
+            # Create subject output directory first
+            subject_output_dir = self.output_dir / f"sub-{subject}"
+            subject_output_dir.mkdir(parents=True, exist_ok=True)
+            
             # Get T1w images for all sessions
             t1w_files = []
+            t1w_files_uncompressed = []
             for session in sessions:
                 files = self.layout.get(
                     subject=subject,
@@ -188,27 +240,31 @@ class BIDSLongitudinalProcessor:
                     extension='.nii.gz'
                 )
                 if files:
-                    t1w_files.extend([f.path for f in files])
+                    for f in files:
+                        t1w_files.append(f.path)
+                        # Gunzip to subject output directory
+                        uncompressed = self.gunzip_file(f.path, subject_output_dir)
+                        t1w_files_uncompressed.append(uncompressed)
                 else:
                     logger.warning(f"No T1w found for {subject} session {session}")
             
-            if len(t1w_files) < 2:
+            if len(t1w_files_uncompressed) < 2:
                 logger.warning(f"Subject {subject}: Insufficient T1w images for longitudinal processing")
                 return False
             
-            # Create subject output directory
-            subject_output_dir = self.output_dir / f"sub-{subject}"
-            subject_output_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Using {len(t1w_files_uncompressed)} uncompressed NIfTI files for processing")
             
-            # Generate CAT12 script
-            script_path = self.script_generator.generate_longitudinal_script(
-                subject=subject,
-                t1w_files=t1w_files,
-                output_dir=subject_output_dir
-            )
+            # Use the CAT12 standalone template for longitudinal processing
+            template_path = Path(os.environ.get('SPMROOT')) / 'standalone' / 'cat_standalone_segment_long.m'
             
-            # Execute CAT12 processing
-            success = self.cat12_processor.execute_script(script_path)
+            if not template_path.exists():
+                logger.error(f"CAT12 standalone template not found: {template_path}")
+                return False
+            
+            logger.info(f"Using CAT12 template: {template_path}")
+            
+            # Execute CAT12 processing with template and input files
+            success = self.cat12_processor.execute_script(template_path, t1w_files_uncompressed)
             
             if success:
                 logger.info(f"Successfully processed subject {subject}")

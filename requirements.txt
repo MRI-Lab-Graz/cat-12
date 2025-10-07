@@ -1,6 +1,6 @@
 # Core BIDS and neuroimaging libraries
 nibabel>=3.2.1
-pybids>=0.15.1
+pybids>=0.15.1,<0.16.0
 pandas>=1.3.0
 numpy>=1.21.0
 
@@ -9,6 +9,8 @@ pathlib>=1.0.1
 pyyaml>=6.0
 click>=8.0.0
 tqdm>=4.62.0
+# Pin upath to avoid protocol parsing issues with pybids
+universal-pathlib<0.2.0
 
 # Logging and utilities
 colorlog>=6.6.0

@@ -199,12 +199,13 @@ class CAT12Processor:
         if not self.mcr_root:
             raise ValueError("MCR_ROOT environment variable not set")
     
-    def execute_script(self, script_path: Path) -> bool:
+    def execute_script(self, script_path: Path, input_files: List[str] = None) -> bool:
         """
-        Execute a CAT12 MATLAB script.
+        Execute a CAT12 batch script.
         
         Args:
-            script_path: Path to MATLAB script
+            script_path: Path to MATLAB batch script (can be template)
+            input_files: List of input NIfTI files to process
             
         Returns:
             True if execution successful
@@ -213,17 +214,31 @@ class CAT12Processor:
             logger.info(f"Executing CAT12 script: {script_path}")
             
             # Prepare command
-            cat12_cmd = os.path.join(self.cat12_root, 'run_cat12.sh')
+            cat12_cmd = os.path.join(self.cat12_root, 'cat_standalone.sh')
             
-            cmd = [
-                cat12_cmd,
-                self.mcr_root,
+            # Build command with files FIRST (as per cat_standalone.sh usage)
+            cmd = [cat12_cmd]
+            
+            # Add input files first if provided
+            if input_files:
+                cmd.extend(input_files)
+                logger.info(f"Processing {len(input_files)} input files")
+            
+            # Then add options
+            cmd.extend([
+                '-m', self.mcr_root,
                 '-b', str(script_path)
-            ]
+            ])
             
             # Set up environment
             env = os.environ.copy()
             env['LD_LIBRARY_PATH'] = self._get_ld_library_path()
+            
+            # Determine output directory
+            if input_files:
+                output_dir = Path(input_files[0]).parent
+            else:
+                output_dir = script_path.parent
             
             # Execute command
             result = subprocess.run(
@@ -235,7 +250,6 @@ class CAT12Processor:
             )
             
             # Log output
-            output_dir = script_path.parent
             with open(output_dir / 'cat12_stdout.log', 'w') as f:
                 f.write(result.stdout)
             
@@ -288,7 +302,7 @@ class CAT12Processor:
         }
         
         if status['cat12_root_exists']:
-            cat12_executable = os.path.join(self.cat12_root, 'run_cat12.sh')
+            cat12_executable = os.path.join(self.cat12_root, 'cat_standalone.sh')
             status['cat12_executable_exists'] = os.path.exists(cat12_executable)
         
         return status
