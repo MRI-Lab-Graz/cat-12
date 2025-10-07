@@ -328,6 +328,7 @@ class CAT12Processor:
                 remaining_stdout, remaining_stderr = process.communicate()
                 if remaining_stdout:
                     stdout_f.write(remaining_stdout)
+                    print(remaining_stdout, end="")
                 if remaining_stderr:
                     stderr_f.write(remaining_stderr)
             
