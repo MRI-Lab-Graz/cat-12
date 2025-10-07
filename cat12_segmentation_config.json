@@ -27,7 +27,7 @@
     "description": "Strength of the accuracy correction"
   },
   "surface": {
-    "value": 1,
+    "value": 0,
     "description": "Surface and thickness creation",
     "choices": {
       "none": 0,

@@ -276,29 +276,69 @@ class CAT12Processor:
             else:
                 output_dir = script_path.parent
             
-            # Execute command
-            result = subprocess.run(
-                cmd,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds
-            )
+            # Execute command with real-time output streaming
+            from colorama import Fore, Style
+            logger.info(f"{Fore.YELLOW}⏳ CAT12 processing started (this may take 10-30 minutes)...{Style.RESET_ALL}")
             
-            # Log output
-            with open(output_dir / 'cat12_stdout.log', 'w') as f:
-                f.write(result.stdout)
+            stdout_log = output_dir / 'cat12_stdout.log'
+            stderr_log = output_dir / 'cat12_stderr.log'
             
-            if result.stderr:
-                with open(output_dir / 'cat12_stderr.log', 'w') as f:
-                    f.write(result.stderr)
+            with open(stdout_log, 'w') as stdout_f, open(stderr_log, 'w') as stderr_f:
+                process = subprocess.Popen(
+                    cmd,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1
+                )
+                
+                # Stream output in real-time
+                import select
+                import time
+                last_output_time = time.time()
+                line_count = 0
+                
+                while True:
+                    # Check if process has finished
+                    if process.poll() is not None:
+                        break
+                    
+                    # Read available output
+                    if process.stdout:
+                        line = process.stdout.readline()
+                        if line:
+                            stdout_f.write(line)
+                            stdout_f.flush()
+                            print(line, end="")
+                            line_count += 1
+                            last_output_time = time.time()
+                            # Show progress every 50 lines
+                            if line_count % 50 == 0:
+                                logger.info(f"{Fore.CYAN}⏳ CAT12 processing... ({line_count} log lines){Style.RESET_ALL}")
+                    
+                    # Show a heartbeat every 30 seconds if no output
+                    if time.time() - last_output_time > 30:
+                        logger.info(f"{Fore.YELLOW}💓 CAT12 still processing...{Style.RESET_ALL}")
+                        last_output_time = time.time()
+                    
+                    time.sleep(0.1)
+                
+                # Read any remaining output
+                remaining_stdout, remaining_stderr = process.communicate()
+                if remaining_stdout:
+                    stdout_f.write(remaining_stdout)
+                if remaining_stderr:
+                    stderr_f.write(remaining_stderr)
             
-            if result.returncode == 0:
-                logger.info("CAT12 processing completed successfully")
+            if process.returncode == 0:
+                logger.info(f"{Fore.GREEN}✅ CAT12 processing completed successfully{Style.RESET_ALL}")
                 return True
             else:
-                logger.error(f"CAT12 processing failed with return code {result.returncode}")
-                logger.error(f"stderr: {result.stderr}")
+                logger.error(f"{Fore.RED}❌ CAT12 processing failed with return code {process.returncode}{Style.RESET_ALL}")
+                if stderr_log.exists() and stderr_log.stat().st_size > 0:
+                    with open(stderr_log, 'r') as f:
+                        logger.error(f"{Fore.RED}Error output: {f.read()[-500:]}{Style.RESET_ALL}")
                 return False
                 
         except subprocess.TimeoutExpired:
