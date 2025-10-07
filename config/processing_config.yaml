@@ -1,0 +1,153 @@
+# CAT12 BIDS Processing Configuration
+# This file contains default settings for processing BIDS datasets with CAT12
+
+# CAT12 Processing Settings
+cat12:
+  # Longitudinal processing (automatically detected based on sessions)
+  longitudinal: true
+  
+  # Surface processing options
+  surface_processing: true
+  
+  # Volume processing options  
+  volume_processing: true
+  
+  # Quality assessment
+  quality_check: true
+  
+  # Parallel processing
+  parallel_jobs: 1
+  
+  # Processing options
+  options:
+    # Spatial registration
+    affine_registration: "mni"
+    
+    # Bias correction strength (0-1)
+    bias_correction_strength: 0.5
+    
+    # Accuracy vs. speed trade-off (0-1)
+    accuracy_strength: 0.5
+    
+    # Surface mesh resolution
+    surface_resolution: 0.5
+    
+    # Surface creation method
+    surface_method: "pbt2x"
+    
+    # Surface resampling and region growing
+    surface_resampling: 22
+
+# BIDS Dataset Settings
+bids:
+  # Validate BIDS structure before processing
+  validate: true
+  
+  # Name for derivatives directory
+  derivatives_name: "cat12"
+  
+  # Include/exclude patterns for participants
+  include_participants: []  # Empty means include all
+  exclude_participants: []  # List of participants to exclude
+  
+  # Session filtering
+  include_sessions: []      # Empty means include all
+  exclude_sessions: []      # List of sessions to exclude
+  
+  # File patterns
+  anatomical:
+    datatype: "anat"
+    suffix: "T1w"
+    extension: ".nii.gz"
+
+# System Configuration
+system:
+  # Use CUDA acceleration if available
+  use_cuda: true
+  
+  # Memory limit (affects processing parameters)
+  memory_limit: "16GB"
+  
+  # Temporary directory for processing
+  temp_dir: "/tmp"
+  
+  # Maximum processing time per subject (seconds)
+  max_processing_time: 7200  # 2 hours
+  
+  # Number of processing retries on failure
+  max_retries: 2
+
+# Output Configuration
+output:
+  # Save modulated grey matter maps
+  modulated_gm: true
+  
+  # Save modulated white matter maps
+  modulated_wm: true
+  
+  # Save native space segmentations
+  native_segmentations: false
+  
+  # Save DARTEL imported images
+  dartel_imported: false
+  
+  # Save deformation fields
+  deformation_fields: true
+  
+  # Save bias corrected images
+  bias_corrected: true
+  
+  # Save surface files
+  surface_files: true
+  
+  # ROI atlases to use
+  atlases:
+    neuromorphometrics: true
+    lpba40: true
+    cobra: true
+    hammers: true
+    
+# Quality Assessment
+quality:
+  # Generate quality reports
+  generate_reports: true
+  
+  # Quality thresholds (0-1, higher is better)
+  thresholds:
+    overall_image_quality: 0.7
+    noise_contrast_ratio: 0.7
+    bias_field_correction: 0.7
+    
+  # Exclude subjects below quality threshold
+  exclude_poor_quality: false
+
+# Logging Configuration
+logging:
+  # Log level (DEBUG, INFO, WARNING, ERROR)
+  level: "INFO"
+  
+  # Log file location
+  log_file: "cat12_processing.log"
+  
+  # Save detailed processing logs
+  detailed_logs: true
+  
+  # Save MATLAB outputs
+  save_matlab_logs: true
+
+# Advanced Options
+advanced:
+  # Custom TPM (tissue probability map) file
+  custom_tpm: null
+  
+  # Additional MATLAB paths
+  additional_paths: []
+  
+  # Custom batch modifications
+  custom_batch_modifications: {}
+  
+  # Environment variables
+  environment_variables:
+    # These will be set automatically by the installation script
+    CAT12_ROOT: null
+    MCR_ROOT: null
