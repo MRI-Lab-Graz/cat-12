@@ -690,17 +690,18 @@ class BIDSLongitudinalProcessor:
 @click.option('--surface-fwhm', default='12', help='Surface smoothing kernel in mm (default: 12)')
 @click.option('--smooth-prefix', default='s', help='Prefix for smoothed files (default: "s")')
 @click.option('--config', type=click.Path(exists=True, path_type=Path), help='Configuration file')
-@click.option('--n-jobs', default=1, type=int, help='Number of parallel jobs (default: 1)')
+@click.option('--n-jobs', default=1, type=str, help='Number of parallel jobs (default: 1). Use "auto" to automatically set jobs based on available RAM (4GB/job, 16GB reserved for system).')
 @click.option('--work-dir', type=click.Path(path_type=Path), help='Work directory for temporary files')
 @click.option('--verbose', is_flag=True, help='Verbose output')
 @click.option('--log-dir', type=click.Path(path_type=Path), help='Directory to write log files (default: <output_dir>/logs)')
 @click.option('--pilot', is_flag=True, help='Process a single random participant for a pilot run')
 @click.option('--cross', is_flag=True, help='Force cross-sectional (use first available session per subject)')
+@click.option('--nohup', is_flag=True, help='Run in background with nohup (detaches from terminal, writes to nohup.out)')
 def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
          preproc, smooth_volume, smooth_surface, qa, tiv, roi,
          no_surface, no_validate, no_cuda,
          volume_fwhm, surface_fwhm, smooth_prefix,
-         config, n_jobs, work_dir, verbose, log_dir, pilot, cross, *args):
+         config, n_jobs, work_dir, verbose, log_dir, pilot, cross, nohup, *args):
     """
     CAT12 BIDS App for structural MRI preprocessing and analysis.
     
@@ -716,6 +717,12 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
       - --session-label 2: Process only session 2 (cross-sectional)
       - --session-label 1 2: Process sessions 1 and 2 (can be longitudinal)
       - --cross: Use only first available session per subject (cross-sectional)
+    
+    \b
+    Parallelization:
+      - --n-jobs N: Run N subjects in parallel (default: 1)
+      - --n-jobs auto: Automatically set jobs based on available RAM (4GB/job, 16GB reserved for system)
+        Example output: "[AUTO] Detected 128.0 GB RAM, reserving 16 GB for system, running 28 parallel CAT12 jobs."
     
     \b
     Examples:
@@ -739,7 +746,35 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
       
       # Pilot mode with cross-sectional
       bids_cat12_processor.py /data/bids /data/derivatives participant --preproc --cross --pilot
+      
+      # Auto parallel jobs
+      bids_cat12_processor.py /data/bids /data/derivatives participant --preproc --n-jobs auto
+      
+      # Run in background (detached from terminal)
+      bids_cat12_processor.py /data/bids /data/derivatives participant --preproc --qa --tiv --n-jobs auto --nohup
     """
+    # Handle --nohup flag: restart in background with nohup
+    if nohup:
+        script_dir = Path(__file__).parent.absolute()
+        env_file = script_dir / '.env'
+        
+        # Build command to re-run without --nohup flag
+        cmd_args = sys.argv[1:]  # Get all arguments except script name
+        # Remove --nohup from arguments
+        cmd_args = [arg for arg in cmd_args if arg != '--nohup']
+        
+        # Build the full command with environment sourcing
+        nohup_cmd = f"cd {script_dir} && source {env_file} && source .venv/bin/activate && nohup python {__file__} {' '.join(cmd_args)} > nohup.out 2>&1 &"
+        
+        print(f"🚀 Starting CAT12 processing in background...")
+        print(f"📝 Output will be written to: {script_dir}/nohup.out")
+        print(f"💡 Monitor progress with: tail -f {script_dir}/nohup.out")
+        
+        # Execute the command
+        subprocess.run(nohup_cmd, shell=True, executable='/bin/bash')
+        print(f"✅ Background process started!")
+        sys.exit(0)
+    
     # Ensure output and working directories exist
     output_dir.mkdir(parents=True, exist_ok=True)
     if work_dir:
