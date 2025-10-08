@@ -668,7 +668,7 @@ class BIDSLongitudinalProcessor:
         # TODO: Call CAT12 ROI extraction function
 
 
-@click.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=True))
+@click.command()
 @click.argument('bids_dir', type=click.Path(exists=True, path_type=Path))
 @click.argument('output_dir', type=click.Path(path_type=Path))
 @click.argument('analysis_level', type=click.Choice(['participant', 'group']), default='participant')
@@ -701,7 +701,7 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
          preproc, smooth_volume, smooth_surface, qa, tiv, roi,
          no_surface, no_validate, no_cuda,
          volume_fwhm, surface_fwhm, smooth_prefix,
-         config, n_jobs, work_dir, verbose, log_dir, pilot, cross, nohup, *args):
+         config, n_jobs, work_dir, verbose, log_dir, pilot, cross, nohup):
     """
     CAT12 BIDS App for structural MRI preprocessing and analysis.
     
@@ -851,9 +851,6 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
     # Add any --participant-label options
     if participant_label:
         participant_labels.extend([f"sub-{p.replace('sub-', '')}" for p in participant_label])
-    # Add any extra positional arguments after analysis_level
-    if args:
-        participant_labels.extend([f"sub-{str(a).replace('sub-', '')}" for a in args])
     if participant_labels:
         logger.info(f"Processing participants: {', '.join(participant_labels)}")
     else:
