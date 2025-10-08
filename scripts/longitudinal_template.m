@@ -1,3 +1,11 @@
+
+% =============================================================
+% MRI-Lab Graz
+% Karl Koschutnig
+% karl.koschutnig@uni-graz.at
+% GitHub repo: https://github.com/MRI-Lab-Graz/cat-12
+% =============================================================
+
 % CAT12 Longitudinal Processing Template
 % This template is used to generate subject-specific processing scripts
 %

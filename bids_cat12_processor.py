@@ -216,7 +216,7 @@ class BIDSLongitudinalProcessor:
             participant_labels: Optional list of specific participants to process
             
         Returns:
-            Dictionary mapping subject IDs to list of session IDs
+            Dictionary mapping subject ID to list of session IDs
         """
         subjects = self.layout.get_subjects()
         if participant_labels:
@@ -610,18 +610,18 @@ class BIDSLongitudinalProcessor:
 @click.option('--volume-fwhm', default='6 6 6', help='Volume smoothing kernel in mm (default: "6 6 6")')
 @click.option('--surface-fwhm', default='12', help='Surface smoothing kernel in mm (default: 12)')
 @click.option('--smooth-prefix', default='s', help='Prefix for smoothed files (default: "s")')
-# Advanced options
 @click.option('--config', type=click.Path(exists=True, path_type=Path), help='Configuration file')
 @click.option('--n-jobs', default=1, type=int, help='Number of parallel jobs (default: 1)')
 @click.option('--work-dir', type=click.Path(path_type=Path), help='Work directory for temporary files')
 @click.option('--verbose', is_flag=True, help='Verbose output')
 @click.option('--log-dir', type=click.Path(path_type=Path), help='Directory to write log files (default: <output_dir>/logs)')
 @click.option('--pilot', is_flag=True, help='Process a single random participant for a pilot run')
+@click.option('--cross', is_flag=True, help='Force cross-sectional processing even if longitudinal data is present')
 def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
          preproc, smooth_volume, smooth_surface, qa, tiv, roi,
          no_surface, no_validate, no_cuda,
          volume_fwhm, surface_fwhm, smooth_prefix,
-         config, n_jobs, work_dir, verbose, log_dir, pilot, *args):
+         config, n_jobs, work_dir, verbose, log_dir, pilot, cross, *args):
     """
     CAT12 BIDS App for structural MRI preprocessing and analysis.
     
@@ -728,7 +728,13 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
         logger.info(f"Processing sessions: {', '.join(session_labels)}")
     
     # Determine if data is longitudinal (automatically detected)
-    longitudinal_subjects = processor.identify_longitudinal_subjects(participant_labels)
+    if cross:
+        logger.info(f"{Fore.YELLOW}⚡ Forcing cross-sectional processing (--cross flag set){Style.RESET_ALL}")
+        # Treat all subjects as cross-sectional
+        longitudinal_subjects = {}
+        cross_sectional_subjects = processor.layout.get_subjects()
+    else:
+        longitudinal_subjects = processor.identify_longitudinal_subjects(participant_labels)
 
     if pilot:
         if longitudinal_subjects:
@@ -737,7 +743,7 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
             logger.info(f"{Fore.YELLOW}🎯 Pilot mode enabled: selected participant sub-{pilot_subject}{Style.RESET_ALL}")
         else:
             logger.warning(f"{Fore.YELLOW}⚠️ Pilot mode requested but no eligible subjects were found. Processing all subjects.{Style.RESET_ALL}")
-    
+
     if analysis_level == 'participant':
         # Run participant-level processing
         if preproc:
@@ -792,5 +798,12 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
     logger.info(f"{Fore.MAGENTA}{'=' * 60}{Style.RESET_ALL}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) == 1:
+        # No arguments: show help and exit
+        from click import Context
+        ctx = Context(main)
+        click.echo(main.get_help(ctx))
+        sys.exit(0)
     main()
