@@ -296,8 +296,15 @@ class CAT12Processor:
                 # Stream output in real-time
                 import select
                 import time
+                import re
                 last_output_time = time.time()
                 line_count = 0
+                
+                # Pattern to detect MATLAB whos output (variable dumps)
+                # Format: varname dimensions bytes class [attributes]
+                # Examples: "  F              5-D                  13251528  single"
+                #          "  a             67x82x67               2944784  single    complex"
+                whos_pattern = re.compile(r'^\s+[a-zA-Z_]\w*\s+(?:\d+[xX-]\d+(?:[xX-]\d+)*|\d+-D)\s+\d+\s+\w+')
                 
                 while True:
                     # Check if process has finished
@@ -310,6 +317,19 @@ class CAT12Processor:
                         if line:
                             stdout_f.write(line)
                             stdout_f.flush()
+                            
+                            # Filter out MATLAB workspace variable dumps
+                            stripped = line.strip()
+                            
+                            # Skip whos output patterns
+                            if whos_pattern.match(line):
+                                continue
+                            
+                            # Skip whos header lines and empty lines between dumps
+                            if not stripped or (stripped.startswith("Name") and "Size" in stripped and "Bytes" in stripped):
+                                continue
+                            
+                            # Print actual CAT12 output
                             print(line, end="")
                             line_count += 1
                             last_output_time = time.time()

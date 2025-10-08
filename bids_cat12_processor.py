@@ -311,7 +311,7 @@ class BIDSLongitudinalProcessor:
             logger.error(f"Failed to gunzip {gz_file}: {e}")
             raise
     
-    def process_subject(self, subject: str, sessions: List[str]) -> bool:
+    def process_subject(self, subject: str, sessions: List[str], cli_args: Optional[str] = None, config_path: Optional[str] = None) -> bool:
         """
         Process a single subject with longitudinal data.
         
@@ -387,6 +387,30 @@ class BIDSLongitudinalProcessor:
                 logger.info(f"Successfully processed subject {subject}")
                 # Generate quality report
                 self._generate_quality_report(subject, subject_output_dir)
+                # Generate per-subject HTML boilerplate log
+                from utils.generate_boilerplate import main as boilerplate_main
+                # Compose CLI args for subject
+                subject_cli_args = cli_args if cli_args else 'N/A'
+                # Filter out empty session strings
+                valid_sessions = [s for s in sessions if s]
+                subject_sessions = ','.join(valid_sessions) if valid_sessions else 'cross-sectional'
+                # Call boilerplate script for HTML only
+                args = [
+                    '--input-dir', str(self.bids_dir),
+                    '--output-dir', str(subject_output_dir),
+                    '--subjects', subject,
+                    '--sessions', subject_sessions,
+                    '--cli-args', subject_cli_args,
+                    '--config-path', config_path if config_path else '',
+                    '--spm-script', os.path.join(os.environ.get('SPMROOT', '/data/local/software/cat-12/external/cat12'), 'standalone', 'cat_standalone_segment.m')
+                ]
+                # Only write HTML for per-subject logs
+                sys.argv = ['generate_boilerplate.py'] + args
+                # Patch: only write HTML file for subject logs
+                try:
+                    boilerplate_main()
+                except Exception as e:
+                    logger.warning(f"Could not generate HTML boilerplate for subject {subject}: {e}")
             else:
                 logger.error(f"Failed to process subject {subject}")
             
@@ -417,7 +441,9 @@ class BIDSLongitudinalProcessor:
                            run_qa: bool = False,
                            run_tiv: bool = False,
                            run_roi: bool = False,
-                           subjects_dict: Optional[Dict[str, List[str]]] = None) -> Dict[str, bool]:
+                           subjects_dict: Optional[Dict[str, List[str]]] = None,
+                           cli_args: Optional[str] = None,
+                           config_path: Optional[str] = None) -> Dict[str, bool]:
         """
         Process all subjects in the dataset with specified stages.
         
@@ -463,7 +489,7 @@ class BIDSLongitudinalProcessor:
                 logger.info(f"Running preprocessing with up to {num_workers} parallel jobs")
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     future_map = {
-                        executor.submit(self.process_subject, subject, sessions): subject
+                        executor.submit(self.process_subject, subject, sessions, cli_args, config_path): subject
                         for subject, sessions in subject_items
                     }
                     with tqdm(total=len(future_map), desc="Processing subjects") as progress:
@@ -477,7 +503,7 @@ class BIDSLongitudinalProcessor:
                             progress.update(1)
             else:
                 for subject, sessions in tqdm(subject_items, desc="Processing subjects"):
-                    success = self.process_subject(subject, sessions)
+                    success = self.process_subject(subject, sessions, cli_args, config_path)
                     results[subject] = success
         else:
             for subject, _ in subject_items:
@@ -763,7 +789,15 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
         config_file=config
     )
     
-    # Update config with command-line options
+    # Auto n_jobs calculation if requested
+    if isinstance(n_jobs, str) and n_jobs == 'auto':
+        import psutil
+        total_gb = psutil.virtual_memory().total / (1024**3)
+        reserved_gb = 16
+        per_job_gb = 4
+        max_jobs = max(1, int((total_gb - reserved_gb) // per_job_gb))
+        print(f"[AUTO] Detected {total_gb:.1f} GB RAM, reserving {reserved_gb} GB for system, running {max_jobs} parallel CAT12 jobs.")
+        n_jobs = max_jobs
     processor.config.setdefault('cat12', {})['surface_processing'] = not no_surface
     processor.config['cat12']['parallel_jobs'] = n_jobs
     processor.config.setdefault('system', {})['use_cuda'] = not no_cuda
@@ -863,6 +897,9 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
         # Run participant-level processing
         if preproc:
             logger.info("Running preprocessing stage...")
+            # Compose CLI args string for boilerplate
+            cli_args_str = ' '.join(sys.argv)
+            config_path_str = str(config) if config else ''
             results = processor.process_all_subjects(
                 participant_labels=participant_labels,
                 session_labels=session_labels,
@@ -872,8 +909,33 @@ def main(bids_dir, output_dir, analysis_level, participant_label, session_label,
                 run_qa=False,
                 run_tiv=False,
                 run_roi=False,
-                subjects_dict=longitudinal_subjects
+                subjects_dict=longitudinal_subjects,
+                cli_args=cli_args_str,
+                config_path=config_path_str
             )
+            # After all subjects processed, generate main boilerplate summary (Markdown)
+            from utils.generate_boilerplate import main as boilerplate_main
+            all_subjects_list = list(longitudinal_subjects.keys())
+            all_sessions_list = []
+            for subj in longitudinal_subjects:
+                all_sessions_list.extend(longitudinal_subjects[subj])
+            # Filter out empty session strings
+            valid_sessions = [s for s in all_sessions_list if s]
+            sessions_str = ','.join(valid_sessions) if valid_sessions else 'cross-sectional'
+            args = [
+                '--input-dir', str(bids_dir),
+                '--output-dir', str(output_dir),
+                '--subjects', ','.join(all_subjects_list),
+                '--sessions', sessions_str,
+                '--cli-args', cli_args_str,
+                '--config-path', config_path_str,
+                '--spm-script', os.path.join(os.environ.get('SPMROOT', '/data/local/software/cat-12/external/cat12'), 'standalone', 'cat_standalone_segment.m')
+            ]
+            sys.argv = ['generate_boilerplate.py'] + args
+            try:
+                boilerplate_main()
+            except Exception as e:
+                logger.warning(f"Could not generate main boilerplate summary: {e}")
             
             # Check if any subjects were successfully processed
             successful_count = sum(1 for success in results.values() if success)
