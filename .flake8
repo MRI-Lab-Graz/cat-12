@@ -1,0 +1,34 @@
+[flake8]
+# Maximum line length
+max-line-length = 120
+
+# Exclude directories
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    external,
+    .eggs,
+    *.egg,
+    build,
+    dist
+
+# Ignore specific errors
+ignore =
+    # Line too long (we set max-line-length to 120)
+    E501,
+    # Line break before binary operator (black compatibility)
+    W503
+
+# Maximum complexity (optional, helps identify overly complex functions)
+max-complexity = 15
+
+# Show source code for each error
+show-source = True
+
+# Count errors
+count = True
+
+# Print total number of errors
+statistics = True
