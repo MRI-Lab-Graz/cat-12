@@ -32,8 +32,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from colorama import init as colorama_init, Fore, Style
 from bids import BIDSLayout
-import click
 from tqdm import tqdm
+import click
 
 # Import custom utilities
 sys.path.append(os.path.join(os.path.dirname(__file__), "utils"))
@@ -92,7 +92,6 @@ def setup_logging(
         console_handler.setFormatter(logging.Formatter("%(message)s"))
         handlers.append(console_handler)
 
-    for handler in handlers:
         root_logger.addHandler(handler)
 
     root_logger.setLevel(log_level)
@@ -152,7 +151,7 @@ class BIDSLongitudinalProcessor:
                 "parallel_jobs": 1,
             },
             "bids": {"validate": True, "derivatives_name": "cat12"},
-            "system": {"use_cuda": True, "memory_limit": "16GB"},
+            "system": {"memory_limit": "16GB"},
         }
 
         if self.config_file and self.config_file.exists():
@@ -785,7 +784,6 @@ class BIDSLongitudinalProcessor:
     "--no-surface", is_flag=True, help="Skip surface extraction during preprocessing"
 )
 @click.option("--no-validate", is_flag=True, help="Skip BIDS validation")
-@click.option("--no-cuda", is_flag=True, help="Disable CUDA/GPU acceleration")
 # Smoothing parameters
 @click.option(
     "--volume-fwhm",
@@ -845,7 +843,6 @@ def main(
     roi,
     no_surface,
     no_validate,
-    no_cuda,
     volume_fwhm,
     surface_fwhm,
     smooth_prefix,
@@ -1000,7 +997,6 @@ def main(
         n_jobs = max_jobs
     processor.config.setdefault("cat12", {})["surface_processing"] = not no_surface
     processor.config["cat12"]["parallel_jobs"] = n_jobs
-    processor.config.setdefault("system", {})["use_cuda"] = not no_cuda
     if work_dir:
         processor.config["system"]["work_dir"] = str(work_dir)
     processor.config.setdefault("logging", {})["log_file"] = str(log_file_path)

@@ -11,14 +11,12 @@ A BIDS App for longitudinal neuroimaging data processing using CAT12 standalone 
 - **No MATLAB License Required**: Uses CAT12 standalone compiled version
 - **No GUI Needed**: Full terminal-based operation for servers
 - **Modular Processing**: Opt-in stages (preproc, smoothing, QA, TIV, ROI)
-- **CUDA Support**: Optimized for Ubuntu servers with GPU acceleration
 - **Contained Installation**: All dependencies managed within project directory using UV
 - **No System Modifications**: Clean installation without affecting system-wide configurations
 
 ## System Requirements
 
 - **Primary Target**: Ubuntu Server (no GUI required)
-- **GPU**: CUDA-compatible GPU recommended
 - **Memory**: Minimum 8GB RAM (16GB+ recommended for longitudinal data)
 - **Storage**: Sufficient space for input data and processing outputs
 - **Python**: 3.8+ (managed via virtual environment)
@@ -37,7 +35,6 @@ This script will:
 - Download and install CAT12 standalone from the official source
 - Set up a contained Python virtual environment using UV
 - Install required BIDS and processing dependencies
-- Configure CUDA if available
 - Create all dependencies within the project directory (no system-wide changes)
 
 ### 2. Activate Environment
@@ -174,7 +171,6 @@ Options (opt-out):
 
 - `--no-surface`: Skip surface extraction during preprocessing
 - `--no-validate`: Skip BIDS validation
-- `--no-cuda`: Disable GPU acceleration
 
 ## BIDS Compatibility
 
@@ -212,7 +208,6 @@ Processing Stages (opt-in, at least one required):
 Options (opt-out):
   --no-surface      Skip surface extraction (volume-only)
   --no-validate     Skip BIDS validation
-  --no-cuda         Disable GPU acceleration
 
 Subject/Session Selection:
   --participant-label LABEL [LABEL ...]   Process specific participants
