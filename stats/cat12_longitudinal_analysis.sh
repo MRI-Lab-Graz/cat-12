@@ -4,21 +4,26 @@
 # =====================================
 #
 # Complete automated workflow from CAT12 preprocessing to TFCE-corrected results.
-# Production Ready - Reviewed 2025-11-19
+# Production Ready - Reviewed 2025-12-03
 #
 # USAGE:
 #   ./cat12_longitudinal_analysis.sh --cat12-dir <path> --participants <tsv> [options]
+#   ./cat12_longitudinal_analysis.sh --design <json> [options]
 #
-# REQUIRED ARGUMENTS:
+# REQUIRED ARGUMENTS (Standard Mode):
 #   --cat12-dir <path>      Path to CAT12 preprocessing output directory
 #   --participants <tsv>    Path to BIDS participants.tsv file
+#
+# REQUIRED ARGUMENTS (Reproduction Mode):
+#   --design <json>         Path to design.json file (reproduces exact analysis)
 #
 # ANALYSIS OPTIONS:
 #   --modality <name>       Analysis type: vbm, thickness, depth, gyrification, fractal
 #                           (default: vbm)
 #   --smoothing <mm>        Smoothing kernel in mm (default: auto-detect)
 #   --analysis-name <name>  Custom name for analysis (default: auto-generated)
-#   --output-dir <path>     Custom output directory (overrides default location)
+#   --output-dir <path> / --output <path>
+#                           Custom output directory (overrides default location)
 #
 # DESIGN OPTIONS:
 #   --group-col <name>      Column name for group variable in participants.tsv
@@ -31,6 +36,7 @@
 #                         Number of TFCE permutations (default: 5000)
 #   --pilot                Run pilot mode (100 permutations, 1 contrast)
 #   --skip-screening       Run TFCE on all contrasts (not recommended)
+#   --no-tfce              Stop after screening (skip TFCE correction)
 #
 # Behavior note: the pipeline now runs TFCE in an automatic two-stage
 # probe-then-full strategy by default (a short probe run is performed to
@@ -43,7 +49,9 @@
 #   --uncorrected-p <p>    Uncorrected p-value threshold for screening (default: 0.001)
 #
 # OTHER OPTIONS:
+#   --config <file>        Path to custom config.ini file
 #   --force                Delete existing results directory before starting
+#   --n-jobs <N>           Parallel jobs for TFCE (default: 4)
 #
 # EXAMPLES:
 #
@@ -80,13 +88,28 @@ STATS_DIR="$SCRIPT_DIR"
 # Load Configuration from config.ini
 # ============================================================================
 
+# Default config file
+CONFIG_FILE="$STATS_DIR/config.ini"
+
+# Pre-parse for --config flag to load correct defaults
+args=("$@")
+for ((i=0; i<$#; i++)); do
+    if [[ "${args[i]}" == "--config" ]]; then
+        next_index=$((i+1))
+        if [[ $next_index -lt $# ]]; then
+            CONFIG_FILE="${args[next_index]}"
+        fi
+        break
+    fi
+done
+
 # Function to read INI values
 get_ini_value() {
     local section="$1"
     local key="$2"
     local default="$3"
     
-    if [[ ! -f "$STATS_DIR/config.ini" ]]; then
+    if [[ ! -f "$CONFIG_FILE" ]]; then
         echo "$default"
         return
     fi
@@ -99,7 +122,7 @@ get_ini_value() {
             print val
             exit
         }
-    ' "$STATS_DIR/config.ini")
+    ' "$CONFIG_FILE")
     
     if [[ -z "$value" ]]; then
         echo "$default"
@@ -172,7 +195,7 @@ run_matlab() {
     if [[ "$USE_STANDALONE" == "true" ]]; then
         # Use the Python wrapper for standalone
         # We assume run_matlab_standalone.py is in STATS_DIR
-        "$PYTHON_EXE" "$STATS_DIR/run_matlab_standalone.py" --utils "$STATS_DIR/utils_clean" "$cmd"
+        "$PYTHON_EXE" "$STATS_DIR/run_matlab_standalone.py" --utils "$STATS_DIR/utils" "$cmd"
     else
         "$MATLAB_EXE" $MATLAB_FLAGS "$cmd"
     fi
@@ -217,15 +240,21 @@ if [[ $# -eq 0 ]]; then
     echo ""
     echo "USAGE:"
     echo "  $0 --cat12-dir <path> --participants <tsv> [options]"
+    echo "  $0 --design <json> [options]"
     echo ""
-    echo "REQUIRED ARGUMENTS:"
+    echo "REQUIRED ARGUMENTS (Standard Mode):"
     echo "  --cat12-dir <path>      Path to CAT12 preprocessing output"
     echo "  --participants <tsv>    Path to BIDS participants.tsv file"
+    echo ""
+    echo "REQUIRED ARGUMENTS (Reproduction Mode):"
+    echo "  --design <json>         Path to design.json file"
     echo ""
     echo "ANALYSIS OPTIONS:"
     echo "  --modality <name>       vbm (default), thickness, depth, gyrification, fractal"
     echo "  --smoothing <mm>        Smoothing kernel (default: auto-detect)"
     echo "  --analysis-name <name>  Custom analysis name (default: auto-generated)"
+    echo "  --output-dir <path> / --output <path>"
+    echo "                          Custom output directory (overrides default location)"
     echo "  --group-col <name>      Group column in participants.tsv (auto-detect if omitted)"
     echo "  --covariates <list>     Covariates: age,sex,tiv (optional)"
     echo ""
@@ -240,6 +269,7 @@ if [[ $# -eq 0 ]]; then
     echo "  --cluster-size <k>      Minimum cluster size (default: 50 voxels)"
     echo ""
     echo "OTHER OPTIONS:"
+    echo "  --config <file>         Path to custom config.ini file"
     echo "  --force                 Delete existing results before starting"
     echo "  --n-jobs <N>            Parallel jobs for TFCE (default: 4)"
     echo "  --help, -h              Show this help message"
@@ -286,6 +316,10 @@ fi
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --config)
+            # Handled in pre-parse loop, just skip
+            shift 2
+            ;;
         --cat12-dir)
             CAT12_DIR="$2"
             shift 2
@@ -310,7 +344,7 @@ while [[ $# -gt 0 ]]; do
             ANALYSIS_NAME="$2"
             shift 2
             ;;
-        --output-dir)
+        --output-dir|--output)
             OUTPUT_DIR="$2"
             shift 2
             ;;
@@ -554,15 +588,8 @@ if [[ "$FORCE" == true ]]; then
                 ;;
             *)
                 echo "Warning: OUTPUT_DIR ($OUTPUT_DIR) is outside expected results path."
-                echo "Removing contents of $OUTPUT_DIR instead of the whole directory."
-                # Safe clean of directory contents
-                shopt -s nullglob
-                files=("$OUTPUT_DIR"/*)
-                if [[ ${#files[@]} -gt 0 ]]; then
-                    rm -rf "${files[@]}"
-                fi
-                shopt -u nullglob
-                echo "✓ Cleaned contents of $OUTPUT_DIR"
+                echo "Skipping automatic cleanup to prevent accidental data loss."
+                echo "Please manually clean the output directory if needed."
                 ;;
         esac
     else
@@ -1043,7 +1070,7 @@ if [[ "$PILOT_MODE" == true ]]; then
     echo "Pilot mode: running single short TFCE run (${N_PERM} perms)"
     # Standalone fix: Read and eval run_tfce_correction
     TFCE_SCRIPT="$STATS_DIR/utils/run_tfce_correction.m"
-    run_matlab "warning('off','MATLAB:dispatcher:nameConflict'); warning('off','all'); set(0,'DefaultFigureVisible','off'); set(0,'DefaultFigureCreateFcn',@(h,ev)[]); $UTILS_PATH_CMD spm('defaults', 'FMRI'); spm_jobman('initcfg'); fprintf('Starting pilot TFCE with %d permutations\n', $N_PERM); stats_folder='$OUTPUT_DIR'; varargin={'n_perm', $N_PERM, 'n_jobs', $N_JOBS, 'pilot', true}; fid=fopen('$TFCE_SCRIPT'); if fid==-1, error('Cannot open TFCE script'); end; txt=fread(fid,'*char')'; fclose(fid); txt=regexprep(txt,'^function[^\n]*\n',''); txt=regexprep(txt,'\nend\s*$',''); txt=regexprep(txt,'config_path = fullfile\(fileparts\(fileparts\(mfilename\(''fullpath''\)\)\), ''config.ini''\);',['config_path = ''$STATS_DIR/config.ini'';']); eval(txt);" 2>&1 | tee -a "$TFCE_LOG" || {
+    run_matlab "warning('off','MATLAB:dispatcher:nameConflict'); warning('off','all'); set(0,'DefaultFigureVisible','off'); set(0,'DefaultFigureCreateFcn',@(h,ev)[]); $UTILS_PATH_CMD spm('defaults', 'FMRI'); spm_jobman('initcfg'); fprintf('Starting pilot TFCE with %d permutations\n', $N_PERM); stats_folder='$OUTPUT_DIR'; varargin={'n_perm', $N_PERM, 'n_jobs', $N_JOBS, 'pilot', true, 'config_file', '$CONFIG_FILE'}; fid=fopen('$TFCE_SCRIPT'); if fid==-1, error('Cannot open TFCE script'); end; txt=fread(fid,'*char')'; fclose(fid); txt=regexprep(txt,'^function[^\n]*\n',''); txt=regexprep(txt,'\nend\s*$',''); eval(txt);" 2>&1 | tee -a "$TFCE_LOG" || {
         echo "Error: TFCE correction (pilot) failed"
         exit 1
     }
@@ -1060,7 +1087,7 @@ else
 
     # Standalone fix: Read and eval run_tfce_correction
     TFCE_SCRIPT="$STATS_DIR/utils/run_tfce_correction.m"
-    run_matlab "warning('off','MATLAB:dispatcher:nameConflict'); warning('off','all'); set(0,'DefaultFigureVisible','off'); set(0,'DefaultFigureCreateFcn',@(h,ev)[]); $UTILS_PATH_CMD spm('defaults', 'FMRI'); spm_jobman('initcfg'); fprintf('Starting TFCE with %d permutations\n', $N_PERM); stats_folder='$OUTPUT_DIR'; varargin={'n_perm', $N_PERM, 'n_jobs', $N_JOBS, 'use_screening', $USE_SCREENING}; fid=fopen('$TFCE_SCRIPT'); if fid==-1, error('Cannot open TFCE script'); end; txt=fread(fid,'*char')'; fclose(fid); txt=regexprep(txt,'^function[^\n]*\n',''); txt=regexprep(txt,'\nend\s*$',''); eval(txt);" 2>&1 | tee -a "$TFCE_LOG" || {
+    run_matlab "warning('off','MATLAB:dispatcher:nameConflict'); warning('off','all'); set(0,'DefaultFigureVisible','off'); set(0,'DefaultFigureCreateFcn',@(h,ev)[]); $UTILS_PATH_CMD spm('defaults', 'FMRI'); spm_jobman('initcfg'); fprintf('Starting TFCE with %d permutations\n', $N_PERM); stats_folder='$OUTPUT_DIR'; varargin={'n_perm', $N_PERM, 'n_jobs', $N_JOBS, 'use_screening', $USE_SCREENING, 'config_file', '$CONFIG_FILE'}; fid=fopen('$TFCE_SCRIPT'); if fid==-1, error('Cannot open TFCE script'); end; txt=fread(fid,'*char')'; fclose(fid); txt=regexprep(txt,'^function[^\n]*\n',''); txt=regexprep(txt,'\nend\s*$',''); eval(txt);" 2>&1 | tee -a "$TFCE_LOG" || {
         echo "Error: TFCE correction failed"
         exit 1
     }

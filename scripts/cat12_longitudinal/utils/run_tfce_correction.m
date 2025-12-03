@@ -33,6 +33,7 @@ addParameter(p, 'contrast_list', [], @isnumeric);
 addParameter(p, 'pilot', false, @islogical);
 addParameter(p, 'force', false, @islogical);
 addParameter(p, 'nuisance_method', '', @ischar);
+addParameter(p, 'config_file', '', @ischar);
 parse(p, stats_folder, varargin{:});
 
 stats_folder = p.Results.stats_folder;
@@ -43,15 +44,20 @@ contrast_list = p.Results.contrast_list;
 pilot_mode = p.Results.pilot;
 force_analysis = p.Results.force;
 
-% Load configuration from config.ini
-% config_path = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'config.ini');
-% if ~exist(config_path, 'file')
-%     error('Configuration file not found: %s', config_path);
-% end
-% config = read_config(config_path);
-config = struct(); % Standalone fix
+% Load configuration
+config_file = '';
+if isfield(p.Results, 'config_file')
+    config_file = p.Results.config_file;
+end
+
+config = struct();
 config.tfce = struct();
 config.performance = struct();
+
+if ~isempty(config_file) && exist(config_file, 'file')
+    fprintf('Loading configuration from: %s\n', config_file);
+    config = read_config_ini(config_file);
+end
 
 % Override defaults with config values if they exist
 if isfield(config, 'tfce')
