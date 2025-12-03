@@ -168,6 +168,21 @@ OUTPUT_DIR=$(get_ini_value "OUTPUT" "output_dir" "")
 ANALYSIS_NAME=$(get_ini_value "OUTPUT" "analysis_name" "")
 FORCE=$(get_ini_value "OUTPUT" "force_clean" "false")
 
+# Safety check: If OUTPUT_DIR is the same as CAT12_DIR, abort immediately
+if [[ -n "$OUTPUT_DIR" ]] && [[ -n "$CAT12_DIR" ]]; then
+    # Normalize paths for comparison
+    ABS_OUTPUT=$(cd "$OUTPUT_DIR" 2>/dev/null && pwd || echo "$OUTPUT_DIR")
+    ABS_CAT12=$(cd "$CAT12_DIR" 2>/dev/null && pwd || echo "$CAT12_DIR")
+    
+    if [[ "$ABS_OUTPUT" == "$ABS_CAT12" ]]; then
+        echo "CRITICAL ERROR: Output directory cannot be the same as CAT12 input directory!"
+        echo "  Input:  $ABS_CAT12"
+        echo "  Output: $ABS_OUTPUT"
+        echo "This would overwrite/delete your input data."
+        exit 1
+    fi
+fi
+
 # Auto-detect MATLAB if empty in config
 USE_STANDALONE=false
 
