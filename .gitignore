@@ -6,6 +6,7 @@ archive/
 nohup*
 stats/
 test_output/
+demo/
 # C extensions
 *.so
 spm*.ps

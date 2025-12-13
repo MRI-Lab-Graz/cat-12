@@ -1150,6 +1150,11 @@ class BIDSLongitudinalProcessor:
     is_flag=True,
     help="Run in background with nohup (detaches from terminal, writes to nohup.out)",
 )
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Plan and validate inputs without executing CAT12 (no processing is performed)",
+)
 def main(
     bids_dir: Path,
     output_dir: Path,
@@ -1172,6 +1177,7 @@ def main(
     pilot: bool,
     cross: bool,
     nohup: bool,
+    dry_run: bool,
 ) -> None:
     """
     CAT12 BIDS App for structural MRI preprocessing and analysis.
@@ -1513,6 +1519,56 @@ def main(
                 f"{Fore.YELLOW}⚠️ Pilot mode requested but no subjects were found.{Style.RESET_ALL}"
             )
             sys.exit(1)
+
+    if dry_run:
+        logger.info(
+            f"{Fore.YELLOW}🧪 DRY RUN: Planning only (no CAT12 execution){Style.RESET_ALL}"
+        )
+        spm_root = os.environ.get("SPMROOT", "") or DEFAULT_SPMROOT
+        long_template = Path(spm_root) / "standalone" / "cat_standalone_segment_long.m"
+        cross_template = Path(spm_root) / "standalone" / "cat_standalone_segment.m"
+
+        logger.info(f"SPMROOT: {spm_root}")
+        logger.info(
+            f"Templates: longitudinal={'OK' if long_template.exists() else 'MISSING'} ({long_template}), cross-sectional={'OK' if cross_template.exists() else 'MISSING'} ({cross_template})"
+        )
+
+        for subject, sessions in longitudinal_subjects.items():
+            if processor.layout is None:
+                raise RuntimeError("BIDS layout not initialized")
+
+            t1w_count = 0
+            per_session_counts: List[str] = []
+            for session in sessions:
+                if session == "":
+                    files = processor.layout.get(
+                        subject=subject,
+                        datatype="anat",
+                        suffix="T1w",
+                        extension=".nii.gz",
+                    )
+                    label = "(no session)"
+                else:
+                    files = processor.layout.get(
+                        subject=subject,
+                        session=session,
+                        datatype="anat",
+                        suffix="T1w",
+                        extension=".nii.gz",
+                    )
+                    label = f"ses-{session}"
+                per_session_counts.append(f"{label}:{len(files)}")
+                t1w_count += len(files)
+
+            template = long_template if t1w_count >= 2 else cross_template
+            logger.info(
+                f"[DRY RUN] sub-{subject}: sessions={sessions} | T1w files={t1w_count} ({', '.join(per_session_counts)}) | template={template.name}"
+            )
+
+        logger.info(
+            f"{Fore.GREEN}✅ DRY RUN complete: inputs indexed successfully; exiting without running CAT12.{Style.RESET_ALL}"
+        )
+        return
 
     if analysis_level == "participant":
         # Run participant-level processing
