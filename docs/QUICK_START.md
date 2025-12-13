@@ -21,8 +21,8 @@ source activate_cat12.sh
 
 ```bash
 # Clone repository
-git clone https://github.com/MRI-Lab-Graz/cat-12.git
-cd cat-12
+git clone https://github.com/MRI-Lab-Graz/bids-cat12-wrapper.git
+cd bids-cat12-wrapper
 
 # Run installation (takes ~30 minutes)
 make install
@@ -364,4 +364,4 @@ source activate_cat12.sh
 - **BIDS Specification:** https://bids-specification.readthedocs.io/
 - **CAT12 Manual:** http://www.neuro.uni-jena.de/cat12/CAT12-Manual.pdf
 - **ENIGMA Protocol:** https://neuro-jena.github.io/enigma-cat12/
-- **GitHub Issues:** https://github.com/MRI-Lab-Graz/cat-12/issues
+- **GitHub Issues:** https://github.com/MRI-Lab-Graz/bids-cat12-wrapper/issues

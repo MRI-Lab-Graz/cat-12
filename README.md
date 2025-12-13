@@ -127,7 +127,7 @@ Use `cat12_stats` to run longitudinal statistical analysis (e.g., VBM, Surface T
 ## Directory Structure
 
 ```
-cat-12/
+bids-cat12-wrapper/
 ├── cat12_prepro                   # Preprocessing entry point
 ├── cat12_stats                    # Statistics entry point
 ├── activate_cat12.sh              # Environment activation script

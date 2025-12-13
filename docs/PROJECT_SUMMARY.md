@@ -15,7 +15,7 @@ A complete **BIDS App** for processing structural MRI data with CAT12 standalone
 ## Project Structure
 
 ```
-cat-12/
+bids-cat12-wrapper/
 ├── README.md                          # Main documentation
 ├── LICENSE                            # MIT license
 ├── pyproject.toml                     # Python project config (UV-compatible)
