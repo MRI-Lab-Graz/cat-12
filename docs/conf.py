@@ -33,6 +33,9 @@ exclude_patterns = [
 
 html_theme = "sphinx_rtd_theme"
 
+# Read the Docs logo (path is relative to this conf.py file)
+html_logo = "cat-bids.png"
+
 # Keep navigation clean and predictable on RTD
 html_show_sourcelink = False
 html_show_sphinx = False
