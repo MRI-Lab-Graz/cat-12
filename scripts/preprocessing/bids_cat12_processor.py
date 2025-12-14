@@ -415,41 +415,21 @@ class BIDSLongitudinalProcessor:
                 f"Using {len(t1w_files_uncompressed)} uncompressed NIfTI files for processing"
             )
 
-            # Choose template based on number of timepoints
-            spm_root = os.environ.get("SPMROOT", "")
-            if not spm_root:
-                logger.warning("SPMROOT environment variable not set, using default")
-                spm_root = DEFAULT_SPMROOT
-
-            if len(t1w_files_uncompressed) >= 2:
-                # Longitudinal processing (2+ timepoints)
-                template_path = (
-                    Path(spm_root) / "standalone" / "cat_standalone_segment_long.m"
-                )
-                logger.info(
-                    f"{Fore.CYAN}📊 Using longitudinal template (multiple timepoints){Style.RESET_ALL}"
-                )
-            else:
-                # Cross-sectional processing (1 timepoint)
-                template_path = (
-                    Path(spm_root) / "standalone" / "cat_standalone_segment.m"
-                )
-                logger.info(
-                    f"{Fore.CYAN}📊 Using cross-sectional template (single timepoint){Style.RESET_ALL}"
-                )
-
-            if not template_path.exists():
-                logger.error(f"CAT12 standalone template not found: {template_path}")
-                return False
-
-            logger.info(f"Using CAT12 template: {template_path}")
-
-            # Execute CAT12 processing with template and input files
-            success = bool(
-                self.cat12_processor.execute_script(
-                template_path, t1w_files_uncompressed
-                )
+            # Generate a subject-specific batch script so CAT12 options actually follow
+            # the selected pipeline (e.g., surface vs VBM-only).
+            generated_script = self.script_generator.generate_longitudinal_script(
+                subject=subject,
+                t1w_files=t1w_files_uncompressed,
+                output_dir=subject_output_dir,
             )
+
+            logger.info(
+                f"{Fore.CYAN}📊 Using generated CAT12 batch script ({'longitudinal' if len(t1w_files_uncompressed) >= 2 else 'cross-sectional'}){Style.RESET_ALL}"
+            )
+            logger.info(f"Using CAT12 batch script: {generated_script}")
+
+            # Execute CAT12 processing (script already contains the file list)
+            success = bool(self.cat12_processor.execute_script(generated_script))
 
             if success:
                 logger.info(f"Successfully processed subject {subject}")

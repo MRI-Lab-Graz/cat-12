@@ -89,6 +89,13 @@ if longitudinal_mode && length(files) > 1
         % Disable surface processing
         matlabbatch{1}.spm.tools.cat.long.surface = struct();
     end
+
+    % Explicitly enable/disable surface outputs
+    if surface_processing
+        matlabbatch{1}.spm.tools.cat.long.output.surface = 1;
+    else
+        matlabbatch{1}.spm.tools.cat.long.output.surface = 0;
+    end
     
     % Volume processing options
     if volume_processing
@@ -170,6 +177,13 @@ else
         matlabbatch{1}.spm.tools.cat.estwrite.surface.close_parahipp = 0;
     else
         matlabbatch{1}.spm.tools.cat.estwrite.surface = struct();
+    end
+
+    % Explicitly enable/disable surface outputs
+    if surface_processing
+        matlabbatch{1}.spm.tools.cat.estwrite.output.surface = 1;
+    else
+        matlabbatch{1}.spm.tools.cat.estwrite.output.surface = 0;
     end
     
     % Volume outputs
