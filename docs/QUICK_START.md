@@ -13,6 +13,15 @@ source activate_cat12.sh
 
 # 3. Process
 ./cat12_prepro /data/bids /data/output participant --preproc
+
+# (Optional) Download from OpenNeuro (then process)
+./cat12_prepro ds003138 /data/output participant \
+    --openneuro --openneuro-tag 1.0.1 \
+    --participant-label 01 --participant-label 02 \
+    --preproc --no-surface
+
+# (Optional) End-to-end demo (download + preprocessing + stats)
+./run_demo_openneuro_ds003138.sh --n-subjects 3 --tag 1.0.1
 ```
 
 ## Step-by-Step Guide
@@ -173,7 +182,7 @@ cat /data/derivatives/cat12/TIV.txt
     /data/derivatives/cat12 \
     participant \
     --preproc \
-    --participant-label 01 02
+    --participant-label 01 --participant-label 02
 ```
 
 ### Use Case 2: Process Only Baseline

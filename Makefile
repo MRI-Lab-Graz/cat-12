@@ -51,7 +51,7 @@ activate:
 dev-install:
 	@echo "Installing development dependencies..."
 	@if [ -f ".venv/bin/activate" ]; then \
-		source .venv/bin/activate && \
+		. .venv/bin/activate && \
 		uv pip install -e ".[dev]"; \
 	else \
 		echo "Virtual environment not found. Run 'make install' first."; \
@@ -62,7 +62,7 @@ dev-install:
 lint:
 	@echo "Running code linting..."
 	@if [ -f ".venv/bin/activate" ]; then \
-		source .venv/bin/activate && \
+		. .venv/bin/activate && \
 		flake8 utils/ scripts/ bids_cat12_processor.py && \
 		mypy utils/ scripts/ bids_cat12_processor.py; \
 	else \
@@ -74,7 +74,7 @@ lint:
 format:
 	@echo "Formatting code..."
 	@if [ -f ".venv/bin/activate" ]; then \
-		source .venv/bin/activate && \
+		. .venv/bin/activate && \
 		black utils/ scripts/ bids_cat12_processor.py && \
 		isort utils/ scripts/ bids_cat12_processor.py; \
 	else \
@@ -86,7 +86,7 @@ format:
 example:
 	@echo "Running example usage script..."
 	@if [ -f ".venv/bin/activate" ]; then \
-		source .venv/bin/activate && \
+		. .venv/bin/activate && \
 		python example_usage.py; \
 	else \
 		echo "Virtual environment not found. Run 'make install' first."; \

@@ -1078,20 +1078,58 @@ class BIDSLongitudinalProcessor:
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]}, name="cat12_prepro")
-@click.argument("bids_dir", type=click.Path(exists=True, path_type=Path))
+@click.argument("bids_dir", type=str)
 @click.argument("output_dir", type=click.Path(path_type=Path))
 @click.argument(
     "analysis_level", type=click.Choice(["participant", "group"]), default="participant"
 )
 @click.option(
+    "--openneuro",
+    is_flag=True,
+    help=(
+        "Treat BIDS_DIR as an OpenNeuro dataset id (e.g., ds003138), download it, "
+        "then run preprocessing on the downloaded BIDS dataset."
+    ),
+)
+@click.option(
+    "--openneuro-tag",
+    type=str,
+    default=None,
+    help=(
+        "Optional OpenNeuro snapshot tag/version (e.g., 1.0.1). If omitted, uses latest."
+    ),
+)
+@click.option(
+    "--openneuro-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Where to download the OpenNeuro dataset. Default: ./openneuro/<dataset_id>"
+    ),
+)
+@click.option(
+    "--openneuro-download-all",
+    is_flag=True,
+    help=(
+        "If set, download T1w data for all subjects in the dataset (can be large). "
+        "If not set, you should pass --participant-label (or --pilot) to limit downloads."
+    ),
+)
+@click.option(
     "--participant-label",
     multiple=True,
-    help="Process specific participants (e.g., sub-01 or just 01)",
+    help=(
+        "Process specific participants (e.g., sub-01 or just 01). "
+        "Repeat the flag for multiple participants (e.g., --participant-label 01 --participant-label 02)."
+    ),
 )
 @click.option(
     "--session-label",
     multiple=True,
-    help="Process specific sessions (e.g., 1, 2, or pre, post). Validates session existence.",
+    help=(
+        "Process specific sessions (e.g., 1, 2, or pre, post). Validates session existence. "
+        "Repeat the flag for multiple sessions (e.g., --session-label 1 --session-label 2)."
+    ),
 )
 # Processing stages (opt-in)
 @click.option("--preproc", is_flag=True, help="Run preprocessing/segmentation")
@@ -1156,9 +1194,13 @@ class BIDSLongitudinalProcessor:
     help="Plan and validate inputs without executing CAT12 (no processing is performed)",
 )
 def main(
-    bids_dir: Path,
+    bids_dir: str,
     output_dir: Path,
     analysis_level: str,
+    openneuro: bool,
+    openneuro_tag: Optional[str],
+    openneuro_dir: Optional[Path],
+    openneuro_download_all: bool,
     participant_label: List[str],
     session_label: List[str],
     preproc: bool,
@@ -1192,7 +1234,7 @@ def main(
     Session Selection:
       - No --session-label: Process all sessions (auto-detect longitudinal/cross-sectional)
       - --session-label 2: Process only session 2 (cross-sectional)
-      - --session-label 1 2: Process sessions 1 and 2 (can be longitudinal)
+            - --session-label 1 --session-label 2: Process sessions 1 and 2 (can be longitudinal)
       - --cross: Use only first available session per subject (cross-sectional)
 
     \b
@@ -1228,7 +1270,7 @@ def main(
       cat12_prepro /data/bids /data/derivatives participant --preproc --smooth-volume 6 8 10 --smooth-surface 12 15
 
       # Process specific participants
-      cat12_prepro /data/bids /data/derivatives participant --preproc --participant-label 01 02
+    cat12_prepro /data/bids /data/derivatives participant --preproc --participant-label 01 --participant-label 02
 
       # Pilot mode with cross-sectional
       cat12_prepro /data/bids /data/derivatives participant --preproc --cross --pilot
@@ -1255,7 +1297,7 @@ def main(
         cmd_args = [arg for arg in cmd_args if arg != "--nohup"]
 
         # Properly quote arguments to preserve spaces within quoted strings
-        quoted_args = " ".join(shlex.quote(arg) for arg in cmd_args)
+        " ".join(shlex.quote(arg) for arg in cmd_args)
 
         print("🚀 Starting CAT12 processing in background...")
         print(f"📝 Output will be written to: {nohup_out}")
@@ -1370,9 +1412,130 @@ def main(
         f"{Fore.MAGENTA}🛠️  Processing stages: {', '.join(stages)}{Style.RESET_ALL}"
     )
 
+    # Resolve BIDS input directory (local path, or OpenNeuro dataset download)
+    resolved_bids_dir: Path
+
+    if openneuro:
+        dataset_id = bids_dir.strip()
+        if not dataset_id:
+            raise click.ClickException(
+                "With --openneuro, BIDS_DIR must be an OpenNeuro dataset id (e.g., ds003138)."
+            )
+
+        target_dir = (
+            openneuro_dir
+            if openneuro_dir is not None
+            else (Path.cwd() / "openneuro" / dataset_id)
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            import openneuro as on
+        except Exception as exc:
+            raise click.ClickException(
+                f"openneuro-py is required for --openneuro but could not be imported: {exc}"
+            )
+
+        # Download minimal BIDS files first (also checks dataset exists / is accessible)
+        try:
+            on.download(
+                dataset=dataset_id,
+                tag=openneuro_tag,
+                target_dir=target_dir,
+                include=["dataset_description.json", "participants.tsv", "participants.json"],
+            )
+        except Exception as exc:
+            raise click.ClickException(
+                f"Failed to download OpenNeuro dataset {dataset_id}"
+                + (f" (tag {openneuro_tag})" if openneuro_tag else "")
+                + f": {exc}"
+            )
+
+        participants_tsv = target_dir / "participants.tsv"
+        if not participants_tsv.exists():
+            raise click.ClickException(
+                f"Downloaded dataset is missing participants.tsv: {participants_tsv}"
+            )
+
+        # Determine which subjects to download for.
+        requested_subjects: List[str] = []
+        if participant_label:
+            requested_subjects = [f"sub-{p.replace('sub-', '')}" for p in participant_label]
+
+        # Check that the dataset contains T1w files (and download T1w for the selected set).
+        import pandas as pd
+        try:
+            df = pd.read_csv(participants_tsv, sep="\t")
+        except Exception as exc:
+            raise click.ClickException(f"Failed to read participants.tsv: {exc}")
+
+        if "participant_id" not in df.columns or df.empty:
+            raise click.ClickException(
+                "participants.tsv is missing participant_id or is empty; cannot validate T1w presence."
+            )
+
+        if not requested_subjects:
+            if pilot:
+                first_pid = str(df["participant_id"].dropna().iloc[0])
+                requested_subjects = [first_pid]
+            elif openneuro_download_all:
+                requested_subjects = [str(x) for x in df["participant_id"].dropna().tolist()]
+            else:
+                raise click.ClickException(
+                    "--openneuro requires a download scope. Provide --participant-label (recommended), "
+                    "or use --pilot, or pass --openneuro-download-all to download all subjects."
+                )
+
+        include_paths = ["dataset_description.json", "participants.tsv", "participants.json"]
+        for pid in requested_subjects:
+            include_paths.append(f"{pid}/**/anat/*T1w.nii.gz")
+            include_paths.append(f"{pid}/**/anat/*T1w.json")
+
+        try:
+            on.download(
+                dataset=dataset_id,
+                tag=openneuro_tag,
+                target_dir=target_dir,
+                include=include_paths,
+            )
+        except Exception as exc:
+            raise click.ClickException(
+                f"OpenNeuro download succeeded but T1w download failed: {exc}"
+            )
+
+        any_t1w = False
+        missing_t1w: List[str] = []
+        for pid in requested_subjects:
+            found = list((target_dir / pid).glob("**/anat/*T1w.nii.gz"))
+            if found:
+                any_t1w = True
+            else:
+                missing_t1w.append(pid)
+
+        if not any_t1w:
+            raise click.ClickException(
+                f"OpenNeuro dataset {dataset_id} does not appear to contain T1w NIfTI data for requested subjects."
+            )
+        if missing_t1w:
+            logger.warning(
+                "Some requested subjects have no T1w files and will likely fail in preprocessing: "
+                + ", ".join(missing_t1w)
+            )
+
+        logger.info(
+            f"Using OpenNeuro dataset {dataset_id}"
+            + (f" (tag {openneuro_tag})" if openneuro_tag else "")
+            + f" downloaded to: {target_dir}"
+        )
+        resolved_bids_dir = target_dir
+    else:
+        resolved_bids_dir = Path(bids_dir)
+        if not resolved_bids_dir.exists():
+            raise click.ClickException(f"BIDS_DIR does not exist: {resolved_bids_dir}")
+
     # Initialize processor
     processor = BIDSLongitudinalProcessor(
-        bids_dir=bids_dir, output_dir=output_dir, config_file=config
+        bids_dir=resolved_bids_dir, output_dir=output_dir, config_file=config
     )
     assert processor.layout is not None
 

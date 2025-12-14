@@ -76,7 +76,17 @@ Use `cat12_prepro` to process your BIDS dataset. It automatically handles longit
 
 # Run on specific participants
 ./cat12_prepro /path/to/bids_input /path/to/output_dir participant \
-    --preproc --participant-label 01 02
+    --preproc --participant-label 01 --participant-label 02
+
+# Download from OpenNeuro (then run preprocessing)
+./cat12_prepro ds003138 /path/to/output_dir participant \
+    --openneuro --openneuro-tag 1.0.1 \
+    --openneuro-dir /path/to/bids_downloads/ds003138 \
+    --participant-label 01 --participant-label 02 \
+    --preproc --no-surface
+
+# End-to-end demo (download + preprocessing + stats)
+./run_demo_openneuro_ds003138.sh --n-subjects 3 --tag 1.0.1
 ```
 
 **Key Flags:**

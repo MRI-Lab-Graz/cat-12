@@ -46,6 +46,9 @@ dependencies = [
     # Optional: Parallel processing
     "joblib>=1.1.0",
     "psutil>=5.8.0",
+
+    # OpenNeuro dataset downloader (demo helper)
+    "openneuro-py>=2025.2.0",
 ]
 
 [project.optional-dependencies]

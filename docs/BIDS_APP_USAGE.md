@@ -122,13 +122,13 @@ Run everything (typical use case):
     /data/derivatives/cat12 \
     participant \
     --preproc \
-    --participant-label 01 02 03
+    --participant-label 01 --participant-label 02 --participant-label 03
 ```
 
 **Notes:**
 - Labels can be with or without `sub-` prefix
 - `--participant-label 01` or `--participant-label sub-01` both work
-- Multiple labels: `--participant-label 01 02 03`
+- Multiple labels: repeat the flag, e.g. `--participant-label 01 --participant-label 02 --participant-label 03`
 
 ### 5. Process Specific Sessions
 
@@ -140,7 +140,7 @@ For datasets with multiple sessions, process only specific timepoints:
     /data/derivatives/cat12 \
     participant \
     --preproc \
-    --session-label 01 02
+    --session-label 01 --session-label 02
 ```
 
 **Result:**

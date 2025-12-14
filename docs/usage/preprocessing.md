@@ -11,6 +11,26 @@ The preprocessing entrypoint is a BIDS App-style CLI that runs CAT12 standalone 
 ./cat12_prepro <bids_dir> <output_dir> <analysis_level> [options]
 ```
 
+### OpenNeuro input (optional)
+
+You can download a public OpenNeuro dataset directly as the input by passing
+`--openneuro`. In this mode, the `bids_dir` argument is interpreted as the
+OpenNeuro dataset id (e.g., `ds003138`).
+
+```bash
+# Download a subset of subjects (recommended)
+./cat12_prepro ds003138 /data/derivatives/cat12 participant \
+  --openneuro --openneuro-tag 1.0.1 \
+  --openneuro-dir /data/bids/ds003138 \
+  --participant-label 01 --participant-label 02 \
+  --preproc --no-surface
+
+# Download all subjects (can be large)
+./cat12_prepro ds003138 /data/derivatives/cat12 participant \
+  --openneuro --openneuro-download-all \
+  --preproc
+```
+
 Arguments:
 - `bids_dir`: BIDS root directory
 - `output_dir`: derivatives output directory
@@ -33,9 +53,11 @@ Notes:
 
 ## Selection options
 
-- `--participant-label <ID> [<ID> ...]` — process only specific participants
+- `--participant-label <ID>` — process only specific participants
   - Accepts `01` or `sub-01`
-- `--session-label <SES> [<SES> ...]` — process only specific sessions
+  - Repeat the flag for multiple participants (e.g., `--participant-label 01 --participant-label 02`)
+- `--session-label <SES>` — process only specific sessions
+  - Repeat the flag for multiple sessions (e.g., `--session-label 01 --session-label 02`)
 - `--cross` — force cross-sectional processing (use first available session per subject)
 - `--pilot` — randomly pick a single participant (useful for a smoke test)
 

@@ -84,6 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- OpenNeuro input support for preprocessing via `--openneuro` (downloads public datasets, then runs CAT12).
+- End-to-end OpenNeuro demo launcher `./run_demo_openneuro_ds003138.sh` (download + preprocessing + stats).
+
+### Changed
+- Documentation and CLI help examples for `--participant-label` / `--session-label` now use repeated flags (Click `multiple=True`).
+
 ### Planned Features
 - Extended quality assessment metrics
 - Additional smoothing options for surfaces
