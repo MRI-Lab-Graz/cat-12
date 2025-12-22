@@ -30,13 +30,71 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Function to download files using wget or curl
+download_file() {
+    local url=$1
+    local output=$2
+    print_status "Downloading $url ..."
+    if command -v wget >/dev/null 2>&1; then
+        wget -q --show-progress -O "$output" "$url"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -L -o "$output" "$url"
+    else
+        print_error "Neither wget nor curl found. Please install one of them."
+        exit 1
+    fi
+}
+
+# Check for required tools
+for tool in unzip python3; do
+    if ! command -v $tool >/dev/null 2>&1; then
+        print_error "Required tool '$tool' not found. Please install it."
+        exit 1
+    fi
+done
+
 print_warning "Third-party software notice: this installer downloads CAT12/SPM12 standalone, MATLAB Runtime (MCR), and Deno from upstream sources."
 print_warning "Those components are NOT part of this repository and remain under their respective licenses/terms."
 print_warning "Proceed only if you agree to comply with upstream licenses."
 
 # Check if running on Ubuntu
 if ! grep -q "Ubuntu" /etc/os-release 2>/dev/null; then
-    print_warning "This script is optimized for Ubuntu. Proceeding anyway..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        print_status "Detected macOS. Adjusting installation for Mac..."
+    else
+        print_warning "This script is optimized for Ubuntu. Proceeding anyway..."
+    fi
+fi
+
+# Detect OS and Architecture
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+IS_MAC=false
+if [[ "$OS" == "Darwin" ]]; then
+    IS_MAC=true
+    if [[ "$ARCH" == "arm64" ]]; then
+        print_warning "Detected Apple Silicon (M1/M2/M3). Ensure Rosetta 2 is installed:"
+        print_warning "softwareupdate --install-rosetta"
+    fi
+fi
+
+# Set URLs and versions based on OS
+if [[ "$IS_MAC" == "true" ]]; then
+    CAT12_URL="https://github.com/ChristianGaser/cat12/releases/download/12.9/CAT12.9_R2023b_MCR_Mac.zip"
+    CAT12_ZIP_NAME="CAT12.9_R2023b_MCR_Mac"
+    MCR_VERSION="v232"
+    MCR_NAME="R2023b"
+    MCR_ARCH="maci64"
+    # Note: MCR installation on Mac is typically via DMG, which is hard to automate.
+    # We'll provide the URL and instructions if it fails.
+    MCR_URL="https://ssd.mathworks.com/supportfiles/downloads/R2023b/Release/7/deployment_files/installer/complete/maci64/MATLAB_Runtime_R2023b_Update_7_maci64.dmg.zip"
+else
+    CAT12_URL="https://github.com/ChristianGaser/cat12/releases/download/12.9/CAT12.9_R2017b_MCR_Linux.zip"
+    CAT12_ZIP_NAME="CAT12.9_R2017b_MCR_Linux"
+    MCR_VERSION="v93"
+    MCR_NAME="R2017b"
+    MCR_ARCH="glnxa64"
+    MCR_URL="https://www.mathworks.com/supportfiles/downloads/R2017b/deployment_files/R2017b/installers/glnxa64/MCR_R2017b_glnxa64_installer.zip"
 fi
 
 # Check for root privileges for system package installation
@@ -57,21 +115,20 @@ mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 # Download CAT12 standalone with MCR
-print_status "Downloading CAT12.9 standalone (R2017b) with integrated SPM12..."
-CAT12_URL="https://github.com/ChristianGaser/cat12/releases/download/12.9/CAT12.9_R2017b_MCR_Linux.zip"
-wget -O cat12_standalone.zip "$CAT12_URL"
+print_status "Downloading CAT12.9 standalone ($MCR_NAME) with integrated SPM12..."
+download_file "$CAT12_URL" "cat12_standalone.zip"
 
 print_status "Extracting CAT12 standalone..."
 unzip -q cat12_standalone.zip
 rm cat12_standalone.zip
 
 # Move the complete CAT12 package to cat12 directory
-if [ -d "CAT12.9_R2017b_MCR_Linux" ]; then
+if [ -d "$CAT12_ZIP_NAME" ]; then
     if [ -d "cat12" ]; then
         print_warning "Removing existing cat12 directory..."
         rm -rf cat12
     fi
-    mv CAT12.9_R2017b_MCR_Linux cat12
+    mv "$CAT12_ZIP_NAME" cat12
 fi
 
 # Make CAT12 standalone scripts executable
@@ -80,27 +137,31 @@ if [ -d "cat12/standalone" ]; then
 fi
 chmod +x cat12/*.sh 2>/dev/null || true
 
-# Download and install MATLAB Runtime v93 (R2017b) if not present
+# Download and install MATLAB Runtime if not present
 MCR_DIR="$INSTALL_DIR/MCR"
-MCR_VERSION="v93"
 if [ ! -d "$MCR_DIR/$MCR_VERSION" ]; then
-    print_status "Downloading MATLAB Runtime R2017b (v93)..."
-    # Try the official MathWorks download URL
-    MCR_URL="https://www.mathworks.com/supportfiles/downloads/R2017b/deployment_files/R2017b/installers/glnxa64/MCR_R2017b_glnxa64_installer.zip"
-    
-    # If that doesn't work, try alternative sources
-    if ! wget -O mcr_installer.zip "$MCR_URL" 2>/dev/null; then
-        print_warning "Official MCR download failed, trying alternative source..."
-        MCR_URL="https://ssd.mathworks.com/supportfiles/downloads/R2017b/Release/9/deployment_files/installer/complete/glnxa64/MATLAB_Runtime_R2017b_Update_9_glnxa64.zip"
-        wget -O mcr_installer.zip "$MCR_URL"
+    if [[ "$IS_MAC" == "true" ]]; then
+        print_warning "Automatic MCR installation on macOS is not fully supported by this script."
+        print_warning "Please download and install MATLAB Runtime $MCR_NAME ($MCR_VERSION) manually from:"
+        print_warning "$MCR_URL"
+        print_warning "Install it to: $MCR_DIR/$MCR_VERSION"
+        print_warning "After installation, you may need to manually update the .env file."
+    else
+        print_status "Downloading MATLAB Runtime $MCR_NAME ($MCR_VERSION)..."
+        if ! download_file "$MCR_URL" "mcr_installer.zip"; then
+            print_warning "Official MCR download failed, trying alternative source..."
+            # Alternative source for Linux R2017b
+            MCR_URL="https://ssd.mathworks.com/supportfiles/downloads/R2017b/Release/9/deployment_files/installer/complete/glnxa64/MATLAB_Runtime_R2017b_Update_9_glnxa64.zip"
+            download_file "$MCR_URL" "mcr_installer.zip"
+        fi
+        
+        print_status "Installing MATLAB Runtime $MCR_NAME ($MCR_VERSION)..."
+        unzip -q mcr_installer.zip
+        ./install -mode silent -agreeToLicense yes -destinationFolder "$MCR_DIR"
+        rm -f mcr_installer.zip install
     fi
-    
-    print_status "Installing MATLAB Runtime R2017b (v93)..."
-    unzip -q mcr_installer.zip
-    ./install -mode silent -agreeToLicense yes -destinationFolder "$MCR_DIR"
-    rm -f mcr_installer.zip install
 else
-    print_status "MATLAB Runtime v93 already installed in workspace."
+    print_status "MATLAB Runtime $MCR_VERSION already installed in workspace."
 fi
 
 # Return to project directory
@@ -108,6 +169,12 @@ cd "$PROJECT_DIR"
 
 # Create environment configuration file
 print_status "Creating environment configuration..."
+if [[ "$IS_MAC" == "true" ]]; then
+    LIB_PATH_VAR="DYLD_LIBRARY_PATH"
+else
+    LIB_PATH_VAR="LD_LIBRARY_PATH"
+fi
+
 cat > .env << EOF
 # CAT12 Standalone Environment Configuration
 # Source this file to set up the environment: source .env
@@ -115,8 +182,8 @@ cat > .env << EOF
 export CAT12_ROOT="$INSTALL_DIR/cat12/standalone"
 export SPMROOT="$INSTALL_DIR/cat12"
 export MCR_ROOT="$MCR_DIR/$MCR_VERSION"
-export MCRROOT="$MCR_ROOT"
-export LD_LIBRARY_PATH="\$MCR_ROOT/runtime/glnxa64:\$MCR_ROOT/bin/glnxa64:\$MCR_ROOT/sys/os/glnxa64:\$MCR_ROOT/sys/opengl/lib/glnxa64:\$LD_LIBRARY_PATH"
+export MCRROOT="\$MCR_ROOT"
+export $LIB_PATH_VAR="\$MCR_ROOT/runtime/$MCR_ARCH:\$MCR_ROOT/bin/$MCR_ARCH:\$MCR_ROOT/sys/os/$MCR_ARCH:\$MCR_ROOT/sys/opengl/lib/$MCR_ARCH:\${$LIB_PATH_VAR}"
 export PATH="\$CAT12_ROOT:\$SPMROOT:\$PATH"
 
 # Deno for BIDS validation (installed into the repo, not the user home)
@@ -154,10 +221,18 @@ else
     ARCH="$(uname -m)"
     case "$ARCH" in
         x86_64|amd64)
-            DENO_TARGET="x86_64-unknown-linux-gnu"
+            if [[ "$IS_MAC" == "true" ]]; then
+                DENO_TARGET="x86_64-apple-darwin"
+            else
+                DENO_TARGET="x86_64-unknown-linux-gnu"
+            fi
             ;;
         aarch64|arm64)
-            DENO_TARGET="aarch64-unknown-linux-gnu"
+            if [[ "$IS_MAC" == "true" ]]; then
+                DENO_TARGET="aarch64-apple-darwin"
+            else
+                DENO_TARGET="aarch64-unknown-linux-gnu"
+            fi
             ;;
         *)
             print_error "Unsupported architecture for Deno: $ARCH"
@@ -168,12 +243,8 @@ else
     DENO_URL="https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-${DENO_TARGET}.zip"
     DENO_ZIP="$INSTALL_DIR/deno_${DENO_VERSION}_${DENO_TARGET}.zip"
 
-    # Use a sanitized runtime environment so system download tools aren't affected
-    # by any active MCR/CAT12-related environment variables.
-    env -u LD_PRELOAD \
-        LD_LIBRARY_PATH="/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu" \
-        PATH="/usr/bin:/bin" \
-        /usr/bin/wget -O "$DENO_ZIP" "$DENO_URL"
+    # Use the download_file function which handles wget/curl and is more portable
+    download_file "$DENO_URL" "$DENO_ZIP"
 
     unzip -q "$DENO_ZIP" -d "$DENO_INSTALL/bin"
     rm -f "$DENO_ZIP"
@@ -215,12 +286,27 @@ if [ -f "$INSTALL_DIR/cat12/standalone/cat_standalone.sh" ] && [ -d "$MCR_DIR/$M
     print_status "Testing CAT12 execution (this may take a moment)..."
     
     # Quick test - try to get version info
-    if timeout 30 bash -c "source '$PROJECT_DIR/.env' && '$INSTALL_DIR/cat12/standalone/cat_standalone.sh' 2>&1 | head -10 | grep -q 'SPM12'" 2>/dev/null; then
-        print_status "✓ CAT12 standalone installation completed successfully!"
-        print_status "✓ SPM12 with CAT12 integration verified"
+    TEST_CMD="source '$PROJECT_DIR/.env' && '$INSTALL_DIR/cat12/standalone/cat_standalone.sh' 2>&1 | head -10 | grep -q 'SPM12'"
+    
+    HAS_TIMEOUT=false
+    if command -v timeout >/dev/null 2>&1; then HAS_TIMEOUT=true; fi
+    
+    if [ "$HAS_TIMEOUT" = true ]; then
+        if timeout 30 bash -c "$TEST_CMD" 2>/dev/null; then
+            print_status "✓ CAT12 standalone installation completed successfully!"
+            print_status "✓ SPM12 with CAT12 integration verified"
+        else
+            print_warning "CAT12 installation completed but execution test inconclusive."
+            print_warning "This may be normal - full testing requires input files."
+        fi
     else
-        print_warning "CAT12 installation completed but execution test inconclusive."
-        print_warning "This may be normal - full testing requires input files."
+        # Fallback for systems without 'timeout' (like default macOS)
+        if bash -c "$TEST_CMD" 2>/dev/null; then
+            print_status "✓ CAT12 standalone installation completed successfully!"
+            print_status "✓ SPM12 with CAT12 integration verified"
+        else
+            print_warning "CAT12 installation completed but execution test inconclusive."
+        fi
     fi
     
     print_status "CAT12 location: $INSTALL_DIR/cat12/standalone"
