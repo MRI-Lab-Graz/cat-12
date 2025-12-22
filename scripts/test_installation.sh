@@ -24,6 +24,18 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Detect OS
+OS="$(uname -s)"
+IS_MAC=false
+if [[ "$OS" == "Darwin" ]]; then
+    IS_MAC=true
+    LIB_PATH_VAR="DYLD_LIBRARY_PATH"
+    MCR_ARCH="maci64"
+else
+    LIB_PATH_VAR="LD_LIBRARY_PATH"
+    MCR_ARCH="glnxa64"
+fi
+
 # Test results
 TESTS_PASSED=0
 TESTS_TOTAL=0
@@ -54,27 +66,47 @@ disk_space_ok() {
 
 # Test 1: Environment variables
 echo "1. Checking environment variables..."
-run_test "CAT12_ROOT" test -n "${CAT12_ROOT:-}"
-run_test "MCR_ROOT" test -n "${MCR_ROOT:-}"
-run_test "LD_LIBRARY_PATH" test -n "${LD_LIBRARY_PATH:-}"
+if [[ "${USE_STANDALONE:-true}" == "true" ]]; then
+    run_test "CAT12_ROOT" test -n "${CAT12_ROOT:-}"
+    run_test "MCR_ROOT" test -n "${MCR_ROOT:-}"
+    run_test "$LIB_PATH_VAR" test -n "${!LIB_PATH_VAR:-}"
+else
+    run_test "SPM_ROOT" test -n "${SPM_ROOT:-}"
+    run_test "MATLAB_EXE" test -n "${MATLAB_EXE:-}"
+fi
 
 # Test 2: Directory existence
 echo -e "\n2. Checking directory structure..."
-run_test "CAT12 root directory" test -d "${CAT12_ROOT:-}"
-run_test "MATLAB Runtime directory" test -d "${MCR_ROOT:-}"
+if [[ "${USE_STANDALONE:-true}" == "true" ]]; then
+    run_test "CAT12 root directory" test -d "${CAT12_ROOT:-}"
+    run_test "MATLAB Runtime directory" test -d "${MCR_ROOT:-}"
+else
+    run_test "SPM root directory" test -d "${SPM_ROOT:-}"
+    run_test "CAT12 toolbox directory" test -d "${SPM_ROOT:-}/toolbox/cat12"
+fi
 
 # Test 3: Executable files
 echo -e "\n3. Checking executable files..."
-run_test "CAT12 executable" test -x "${CAT12_ROOT:-}/cat_standalone.sh"
+if [[ "${USE_STANDALONE:-true}" == "true" ]]; then
+    run_test "CAT12 executable" test -x "${CAT12_ROOT:-}/cat_standalone.sh"
+else
+    run_test "MATLAB executable" command -v "${MATLAB_EXE:-matlab}"
+fi
 
 # Test 4: MATLAB Runtime libraries
-echo -e "\n4. Checking MATLAB Runtime libraries..."
-run_test "MCR runtime libraries" test -d "${MCR_ROOT:-}/runtime/glnxa64"
-run_test "MCR bin directory" test -d "${MCR_ROOT:-}/bin/glnxa64"
+if [[ "${USE_STANDALONE:-true}" == "true" ]]; then
+    echo -e "\n4. Checking MATLAB Runtime libraries..."
+    run_test "MCR runtime libraries" test -d "${MCR_ROOT:-}/runtime/$MCR_ARCH"
+    run_test "MCR bin directory" test -d "${MCR_ROOT:-}/bin/$MCR_ARCH"
+fi
 
 # Test 5: System dependencies
 echo -e "\n5. Checking system dependencies..."
-run_test "wget command" command -v wget
+if [[ "$IS_MAC" == "true" ]]; then
+    run_test "curl command" command -v curl
+else
+    run_test "wget command" command -v wget
+fi
 run_test "unzip command" command -v unzip
 run_test "python3 command" command -v python3
 
@@ -92,17 +124,32 @@ fi
 # Test 7: CAT12 functionality test
 echo -e "\n7. Testing CAT12 basic functionality..."
 if [ -n "$CAT12_ROOT" ] && [ -x "$CAT12_ROOT/cat_standalone.sh" ] && [ -n "$MCR_ROOT" ]; then
-    # Test if CAT12 can start and show version info
-    TEST_OUTPUT=$(timeout 15s "$CAT12_ROOT/cat_standalone.sh" 2>&1 | head -20 || true)
-    if echo "$TEST_OUTPUT" | grep -q -i "spm12.*version\|cat12" 2>/dev/null; then
-        echo -e "   ${GREEN}✓ CAT12 executable starts and shows version info${NC}"
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-    elif echo "$TEST_OUTPUT" | grep -q -i "matlab.*runtime\|setting up environment" 2>/dev/null; then
-        echo -e "   ${GREEN}✓ CAT12 executable starts (version check inconclusive)${NC}"
-        TESTS_PASSED=$((TESTS_PASSED + 1))
+    # Test if CAT12 can start. We check for actual execution, not just the help text.
+    # We look for strings that indicate the MCR has actually initialized.
+    if command -v timeout >/dev/null 2>&1; then
+        TEST_OUTPUT=$("$CAT12_ROOT/cat_standalone.sh" 2>&1 | head -50 || true)
+    else
+        # Fallback for systems without timeout (like macOS)
+        "$CAT12_ROOT/cat_standalone.sh" > /tmp/cat_test_out 2>&1 &
+        CAT_PID=$!
+        (sleep 10 && kill $CAT_PID 2>/dev/null) &
+        wait $CAT_PID 2>/dev/null || true
+        TEST_OUTPUT=$(cat /tmp/cat_test_out || true)
+        rm -f /tmp/cat_test_out
+    fi
+
+    # If MCR is missing, the script usually prints an error about DYLD_LIBRARY_PATH or missing libraries.
+    # If it works, it should show the SPM12/CAT12 version from the COMPILED binary.
+    if echo "$TEST_OUTPUT" | grep -q "Checking MCRROOT" 2>/dev/null || echo "$TEST_OUTPUT" | grep -q "Setting up environment" 2>/dev/null; then
+        if [ -d "$MCR_ROOT" ]; then
+             echo -e "   ${GREEN}✓ CAT12 environment initialized${NC}"
+             TESTS_PASSED=$((TESTS_PASSED + 1))
+        else
+             echo -e "   ${RED}✗ CAT12 environment failed (MCR directory missing)${NC}"
+        fi
     else
         echo -e "   ${RED}✗ CAT12 executable test failed${NC}"
-        echo "   Debug output: $TEST_OUTPUT"
+        echo "   Debug output: $(echo "$TEST_OUTPUT" | head -n 5)"
     fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 else
@@ -116,12 +163,24 @@ run_test "Sufficient disk space (>5GB)" disk_space_ok
 
 # Test 9: Memory check
 echo -e "\n9. Checking system memory..."
-TOTAL_MEM=$(grep MemTotal /proc/meminfo | awk '{print $2}' 2>/dev/null || echo "0")
-if [ "$TOTAL_MEM" -gt 8000000 ]; then  # 8GB in KB
-    echo -e "   ${GREEN}✓ Sufficient memory ($(($TOTAL_MEM/1024/1024))GB)${NC}"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
+if [[ "$IS_MAC" == "true" ]]; then
+    TOTAL_MEM_BYTES=$(sysctl -n hw.memsize 2>/dev/null || echo "0")
+    TOTAL_MEM_GB=$((TOTAL_MEM_BYTES / 1024 / 1024 / 1024))
+    if [ "$TOTAL_MEM_GB" -ge 8 ]; then
+        echo -e "   ${GREEN}✓ Sufficient memory (${TOTAL_MEM_GB}GB)${NC}"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        echo -e "   ${YELLOW}⚠ Limited memory (${TOTAL_MEM_GB}GB) - processing may be slow${NC}"
+    fi
 else
-    echo -e "   ${YELLOW}⚠ Limited memory ($(($TOTAL_MEM/1024/1024))GB) - processing may be slow${NC}"
+    TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}' 2>/dev/null || echo "0")
+    TOTAL_MEM_GB=$((TOTAL_MEM_KB / 1024 / 1024))
+    if [ "$TOTAL_MEM_KB" -gt 8000000 ]; then  # 8GB in KB
+        echo -e "   ${GREEN}✓ Sufficient memory (${TOTAL_MEM_GB}GB)${NC}"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        echo -e "   ${YELLOW}⚠ Limited memory (${TOTAL_MEM_GB}GB) - processing may be slow${NC}"
+    fi
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 

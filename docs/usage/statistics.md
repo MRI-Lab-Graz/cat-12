@@ -122,3 +122,17 @@ Each run writes a pipeline log:
 ## Configuration defaults
 
 Many defaults come from `config/config.ini` and can be overridden by flags.
+
+## Post-Stats Reporting
+
+After the analysis is complete, you can generate a comprehensive HTML report summarizing the significant results.
+
+```bash
+./.venv/bin/python scripts/stats/post_stats_report.py /path/to/results/folder
+```
+
+This script will:
+- Check for significant voxels at multiple thresholds ($p < 0.01$, $p < 0.05$, $p < 0.1$).
+- Summarize results for FWE, FDR, and Uncorrected maps.
+- Map peak coordinates to anatomical regions using the **AAL3 atlas**.
+- Generate a color-coded HTML report for easy review.

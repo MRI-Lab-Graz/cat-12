@@ -73,14 +73,47 @@ IS_MAC=false
 if [[ "$OS" == "Darwin" ]]; then
     IS_MAC=true
     if [[ "$ARCH" == "arm64" ]]; then
-        print_warning "Detected Apple Silicon (M1/M2/M3). Ensure Rosetta 2 is installed:"
-        print_warning "softwareupdate --install-rosetta"
+        print_status "Detected Apple Silicon (M1/M2/M3)."
+        # Check if Rosetta 2 is installed
+        if /usr/bin/pgrep -q oahd 2>/dev/null || [ -f "/Library/Apple/usr/share/rosetta/rosetta" ]; then
+            print_status "✓ Rosetta 2 is installed."
+        else
+            print_warning "Rosetta 2 is NOT detected. It is required to run the Intel-based MATLAB Runtime on Apple Silicon."
+            print_warning "NOTE: Rosetta 2 is a system-level translation layer provided by Apple."
+            print_warning "Installing it is a one-time system-wide change that requires administrator privileges."
+            print_warning "If you prefer not to install Rosetta 2, you will not be able to run CAT12 standalone on this machine."
+            print_warning "To install it, run: softwareupdate --install-rosetta"
+        fi
     fi
 fi
 
+# Inform user about download size and requirements
+echo ""
+print_status "Installation Requirements & Info:"
+print_status "• CAT12 Standalone: ~1GB download"
+print_status "• MATLAB Runtime (MCR): ~3GB download"
+print_status "• Total disk space required: ~10GB"
+print_status "• Installation time: 5-15 minutes depending on connection"
+if [[ "$IS_MAC" == "true" ]]; then
+    print_status "• macOS: MCR will be installed automatically via DMG mounting"
+fi
+
+# User confirmation
+echo ""
+read -p "Do you agree to the third-party licenses and want to proceed? (y/n): " confirm
+if [[ ! $confirm =~ ^[Yy]$ ]]; then
+    print_status "Installation cancelled by user."
+    exit 0
+fi
+echo ""
+
+# Version pinning for reproducibility
+CAT12_VERSION="12.9"
+DENO_VERSION="2.6.0"
+
 # Set URLs and versions based on OS
 if [[ "$IS_MAC" == "true" ]]; then
-    CAT12_URL="https://github.com/ChristianGaser/cat12/releases/download/12.9/CAT12.9_R2023b_MCR_Mac.zip"
+    CAT12_URL="https://github.com/ChristianGaser/cat12/releases/download/${CAT12_VERSION}/CAT12.9_R2023b_MCR_Mac.zip"
     CAT12_ZIP_NAME="CAT12.9_R2023b_MCR_Mac"
     MCR_VERSION="v232"
     MCR_NAME="R2023b"
@@ -89,7 +122,7 @@ if [[ "$IS_MAC" == "true" ]]; then
     # We'll provide the URL and instructions if it fails.
     MCR_URL="https://ssd.mathworks.com/supportfiles/downloads/R2023b/Release/7/deployment_files/installer/complete/maci64/MATLAB_Runtime_R2023b_Update_7_maci64.dmg.zip"
 else
-    CAT12_URL="https://github.com/ChristianGaser/cat12/releases/download/12.9/CAT12.9_R2017b_MCR_Linux.zip"
+    CAT12_URL="https://github.com/ChristianGaser/cat12/releases/download/${CAT12_VERSION}/CAT12.9_R2017b_MCR_Linux.zip"
     CAT12_ZIP_NAME="CAT12.9_R2017b_MCR_Linux"
     MCR_VERSION="v93"
     MCR_NAME="R2017b"
@@ -137,15 +170,105 @@ if [ -d "cat12/standalone" ]; then
 fi
 chmod +x cat12/*.sh 2>/dev/null || true
 
+# Patch cat_standalone.sh for macOS path compatibility if needed
+if [[ "$IS_MAC" == "true" ]]; then
+    print_status "Patching cat_standalone.sh for macOS path compatibility..."
+    CAT_STANDALONE_SCRIPT="$INSTALL_DIR/cat12/standalone/cat_standalone.sh"
+    # Find the actual cat12 toolbox directory inside the app bundle
+    ACTUAL_CAT12_DIR=$(find "$INSTALL_DIR/cat12" -name "cat12.m" | head -n 1 | xargs dirname)
+    if [ -n "$ACTUAL_CAT12_DIR" ]; then
+        print_status "Found CAT12 toolbox at: $ACTUAL_CAT12_DIR"
+        # Use a different delimiter for sed to avoid escaping issues with paths
+        sed -i '' "s|cat12_dir=\"\${SPMROOT}/spm12.app/Contents/MacOS/spm12/toolbox/cat12\"|cat12_dir=\"$ACTUAL_CAT12_DIR\"|" "$CAT_STANDALONE_SCRIPT"
+    fi
+fi
+
 # Download and install MATLAB Runtime if not present
 MCR_DIR="$INSTALL_DIR/MCR"
 if [ ! -d "$MCR_DIR/$MCR_VERSION" ]; then
     if [[ "$IS_MAC" == "true" ]]; then
-        print_warning "Automatic MCR installation on macOS is not fully supported by this script."
-        print_warning "Please download and install MATLAB Runtime $MCR_NAME ($MCR_VERSION) manually from:"
-        print_warning "$MCR_URL"
-        print_warning "Install it to: $MCR_DIR/$MCR_VERSION"
-        print_warning "After installation, you may need to manually update the .env file."
+        print_status "Attempting automatic MATLAB Runtime $MCR_NAME ($MCR_VERSION) installation on macOS..."
+        print_warning "This requires downloading ~3GB and may take a while."
+        
+        if ! download_file "$MCR_URL" "mcr_installer.dmg.zip"; then
+            print_error "Failed to download MCR. Please install it manually."
+        else
+            print_status "Extracting DMG..."
+            unzip -q mcr_installer.dmg.zip
+            DMG_FILE=$(ls *.dmg | head -n 1)
+            
+            print_status "Mounting $DMG_FILE ..."
+            # Mount the DMG and get the mount point
+            MOUNT_POINT=$(hdiutil mount "$DMG_FILE" | grep "/Volumes/" | awk -F'\t' '{print $3}' | xargs)
+            
+            if [ -n "$MOUNT_POINT" ]; then
+                print_status "Mounted at: $MOUNT_POINT"
+                # Look for the installer app or binary - R2023b specific paths
+                INSTALLER_BIN=""
+                if [ -f "$MOUNT_POINT/InstallForMacOS.app/Contents/MacOS/install" ]; then
+                    INSTALLER_BIN="$MOUNT_POINT/InstallForMacOS.app/Contents/MacOS/install"
+                elif [ -f "$MOUNT_POINT/InstallForMacOSIntelProcessor.app/Contents/MacOS/InstallForMacOSIntelProcessor" ]; then
+                    INSTALLER_BIN="$MOUNT_POINT/InstallForMacOSIntelProcessor.app/Contents/MacOS/InstallForMacOSIntelProcessor"
+                elif [ -f "$MOUNT_POINT/setup" ]; then
+                    INSTALLER_BIN="$MOUNT_POINT/setup"
+                else
+                    # Fallback search for any executable in a MacOS folder
+                    INSTALLER_BIN=$(find "$MOUNT_POINT" -maxdepth 4 -path "*/Contents/MacOS/*" -type f -perm +111 | head -n 1)
+                fi
+                
+                if [ -n "$INSTALLER_BIN" ]; then
+                    print_status "Found installer at: $INSTALLER_BIN"
+                    print_status "Running silent installer (this will take several minutes)..."
+                    
+                    # Create destination directory
+                    mkdir -p "$MCR_DIR"
+                    
+                    # Try running the installer. 
+                    # On macOS, the R2023b installer sometimes needs different flags or sudo.
+                    # We try the most common silent flags.
+                    if "$INSTALLER_BIN" -mode silent -agreeToLicense yes -destinationFolder "$MCR_DIR" || \
+                       "$INSTALLER_BIN" -silent -agreeToLicense yes -destinationFolder "$MCR_DIR"; then
+                        print_status "✓ MATLAB Runtime installed successfully."
+                    else
+                        print_warning "Silent installation failed. Attempting with sudo..."
+                        if sudo "$INSTALLER_BIN" -mode silent -agreeToLicense yes -destinationFolder "$MCR_DIR"; then
+                            print_status "✓ MATLAB Runtime installed successfully (with sudo)."
+                        else
+                            print_error "MCR installation failed."
+                            print_status "You may need to install it manually from the mounted DMG."
+                            print_status "Mount point: $MOUNT_POINT"
+                            hdiutil detach "$MOUNT_POINT"
+                            exit 1
+                        fi
+                    fi
+
+                    # Verify installation and find the actual root
+                    if [ ! -d "$MCR_DIR/$MCR_VERSION/runtime/$MCR_ARCH" ]; then
+                        print_warning "MCR installed but structure is unexpected. Looking for runtime directory..."
+                        # The installer might have installed to a subdirectory or a different version name
+                        ACTUAL_MCR_ROOT=$(find "$MCR_DIR" -name "runtime" -type d -path "*/$MCR_ARCH/*" | head -n 1 | xargs dirname | xargs dirname)
+                        if [ -n "$ACTUAL_MCR_ROOT" ]; then
+                            print_status "Found actual MCR root at: $ACTUAL_MCR_ROOT"
+                            MCR_ROOT_OVERRIDE="$ACTUAL_MCR_ROOT"
+                        fi
+                    fi
+                else
+                    print_error "Could not find installer binary in DMG."
+                    print_status "DMG Contents:"
+                    ls -R "$MOUNT_POINT"
+                    hdiutil detach "$MOUNT_POINT"
+                    exit 1
+                fi
+                
+                print_status "Unmounting $MOUNT_POINT ..."
+                hdiutil detach "$MOUNT_POINT"
+            else
+                print_error "Failed to mount DMG."
+                exit 1
+            fi
+            
+            rm -f mcr_installer.dmg.zip "$DMG_FILE"
+        fi
     else
         print_status "Downloading MATLAB Runtime $MCR_NAME ($MCR_VERSION)..."
         if ! download_file "$MCR_URL" "mcr_installer.zip"; then
@@ -181,7 +304,7 @@ cat > .env << EOF
 
 export CAT12_ROOT="$INSTALL_DIR/cat12/standalone"
 export SPMROOT="$INSTALL_DIR/cat12"
-export MCR_ROOT="$MCR_DIR/$MCR_VERSION"
+export MCR_ROOT="${MCR_ROOT_OVERRIDE:-$MCR_DIR/$MCR_VERSION}"
 export MCRROOT="\$MCR_ROOT"
 export $LIB_PATH_VAR="\$MCR_ROOT/runtime/$MCR_ARCH:\$MCR_ROOT/bin/$MCR_ARCH:\$MCR_ROOT/sys/os/$MCR_ARCH:\$MCR_ROOT/sys/opengl/lib/$MCR_ARCH:\${$LIB_PATH_VAR}"
 export PATH="\$CAT12_ROOT:\$SPMROOT:\$PATH"
@@ -215,9 +338,9 @@ if [ -x "$DENO_INSTALL/bin/deno" ]; then
 else
     print_status "Installing pinned Deno release into: $DENO_INSTALL"
 
-    # NOTE: We intentionally avoid the upstream install.sh because it can modify
+# NOTE: We intentionally avoid the upstream install.sh because it can modify
     # shell startup files under the user's home directory.
-    DENO_VERSION="2.6.0"
+    # DENO_VERSION is defined at the top of the script for version pinning.
     ARCH="$(uname -m)"
     case "$ARCH" in
         x86_64|amd64)
@@ -281,40 +404,56 @@ uv pip install --force-reinstall 'pybids>=0.15.1,<0.16.0' 'universal-pathlib<0.2
 
 print_status "Testing CAT12 installation..."
 # Test CAT12 installation by checking if it can start
-if [ -f "$INSTALL_DIR/cat12/standalone/cat_standalone.sh" ] && [ -d "$MCR_DIR/$MCR_VERSION" ]; then
+CAT_STANDALONE_SCRIPT="$INSTALL_DIR/cat12/standalone/cat_standalone.sh"
+MCR_INSTALLED_DIR="$MCR_DIR/$MCR_VERSION"
+
+if [ -f "$CAT_STANDALONE_SCRIPT" ]; then
     print_status "CAT12 standalone files found."
-    print_status "Testing CAT12 execution (this may take a moment)..."
     
-    # Quick test - try to get version info
-    TEST_CMD="source '$PROJECT_DIR/.env' && '$INSTALL_DIR/cat12/standalone/cat_standalone.sh' 2>&1 | head -10 | grep -q 'SPM12'"
-    
-    HAS_TIMEOUT=false
-    if command -v timeout >/dev/null 2>&1; then HAS_TIMEOUT=true; fi
-    
-    if [ "$HAS_TIMEOUT" = true ]; then
-        if timeout 30 bash -c "$TEST_CMD" 2>/dev/null; then
-            print_status "✓ CAT12 standalone installation completed successfully!"
-            print_status "✓ SPM12 with CAT12 integration verified"
+    if [ -d "$MCR_INSTALLED_DIR" ]; then
+        print_status "Testing CAT12 execution (this may take a moment)..."
+        
+        # Quick test - try to get version info
+        TEST_CMD="source '$PROJECT_DIR/.env' && '$CAT_STANDALONE_SCRIPT' 2>&1 | head -10 | grep -q 'SPM12'"
+        
+        HAS_TIMEOUT=false
+        if command -v timeout >/dev/null 2>&1; then HAS_TIMEOUT=true; fi
+        
+        if [ "$HAS_TIMEOUT" = true ]; then
+            if timeout 30 bash -c "$TEST_CMD" 2>/dev/null; then
+                print_status "✓ CAT12 standalone installation completed successfully!"
+                print_status "✓ SPM12 with CAT12 integration verified"
+            else
+                print_warning "CAT12 installation completed but execution test inconclusive."
+                print_warning "This may be normal - full testing requires input files."
+            fi
         else
-            print_warning "CAT12 installation completed but execution test inconclusive."
-            print_warning "This may be normal - full testing requires input files."
+            # Fallback for systems without 'timeout' (like default macOS)
+            if bash -c "$TEST_CMD" 2>/dev/null; then
+                print_status "✓ CAT12 standalone installation completed successfully!"
+                print_status "✓ SPM12 with CAT12 integration verified"
+            else
+                print_warning "CAT12 installation completed but execution test inconclusive."
+            fi
         fi
     else
-        # Fallback for systems without 'timeout' (like default macOS)
-        if bash -c "$TEST_CMD" 2>/dev/null; then
-            print_status "✓ CAT12 standalone installation completed successfully!"
-            print_status "✓ SPM12 with CAT12 integration verified"
+        if [[ "$IS_MAC" == "true" ]]; then
+            print_warning "CAT12 files are present, but MATLAB Runtime (MCR) is missing."
+            print_warning "Please complete the manual MCR installation as instructed above."
+            print_warning "Expected MCR location: $MCR_INSTALLED_DIR"
         else
-            print_warning "CAT12 installation completed but execution test inconclusive."
+            print_error "CAT12 installation failed! MCR missing at: $MCR_INSTALLED_DIR"
+            exit 1
         fi
     fi
     
     print_status "CAT12 location: $INSTALL_DIR/cat12/standalone"
-    print_status "MCR location: $MCR_DIR/$MCR_VERSION"
+    if [ -d "$MCR_INSTALLED_DIR" ]; then
+        print_status "MCR location: $MCR_INSTALLED_DIR"
+    fi
     print_status "To use CAT12, run: source .env"
 else
-    print_error "CAT12 installation failed!"
-    print_error "Missing: $INSTALL_DIR/cat12/standalone/cat_standalone.sh or $MCR_DIR/$MCR_VERSION"
+    print_error "CAT12 installation failed! Missing: $CAT_STANDALONE_SCRIPT"
     exit 1
 fi
 
@@ -360,16 +499,21 @@ EOF
 chmod +x activate_cat12.sh
 
 echo "=========================================="
-print_status "CAT12.9 (R2017b) Installation completed!"
+print_status "CAT12.9 ($MCR_NAME) Installation completed!"
+echo "=========================================="
+print_status "Pinned Versions (for reproducibility):"
+print_status "• CAT12: $CAT12_VERSION"
+print_status "• Deno:  $DENO_VERSION"
+print_status "• MCR:   $MCR_NAME ($MCR_VERSION)"
 echo "=========================================="
 print_status "Components installed:"
 print_status "• CAT12.9 with integrated SPM12 standalone"
-print_status "• MATLAB Runtime R2017b (v93)"
+print_status "• MATLAB Runtime $MCR_NAME ($MCR_VERSION)"
 print_status "• Python virtual environment with dependencies"
 echo "=========================================="
 print_status "Next steps:"
 print_status "1. Activate the environment: source activate_cat12.sh"
-print_status "2. Test installation: ./test_installation.sh"
+print_status "2. Test installation: ./scripts/test_installation.sh"
 print_status "3. Process BIDS data: python bids_cat12_processor.py --help"
 echo "=========================================="
 print_status "All dependencies are contained within this project directory."

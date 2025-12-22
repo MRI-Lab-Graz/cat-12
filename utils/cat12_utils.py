@@ -8,6 +8,7 @@ executing CAT12 standalone, and managing CAT12 processing workflows.
 import json
 import logging
 import os
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -228,16 +229,24 @@ class CAT12Processor:
         )
         self.use_cuda = bool(self.config.get("system", {}).get("use_cuda", True))
 
-        cat12_root_env = os.environ.get("CAT12_ROOT")
-        mcr_root_env = os.environ.get("MCR_ROOT")
+        self.use_standalone = os.environ.get("USE_STANDALONE", "true").lower() == "true"
 
-        if not cat12_root_env:
-            raise ValueError("CAT12_ROOT environment variable not set")
-        if not mcr_root_env:
-            raise ValueError("MCR_ROOT environment variable not set")
+        if self.use_standalone:
+            cat12_root_env = os.environ.get("CAT12_ROOT")
+            mcr_root_env = os.environ.get("MCR_ROOT")
 
-        self.cat12_root: str = cat12_root_env
-        self.mcr_root: str = mcr_root_env
+            if not cat12_root_env:
+                raise ValueError("CAT12_ROOT environment variable not set")
+            if not mcr_root_env:
+                raise ValueError("MCR_ROOT environment variable not set")
+
+            self.cat12_root: str = cat12_root_env
+            self.mcr_root: str = mcr_root_env
+        else:
+            self.matlab_exe = os.environ.get("MATLAB_EXE", "matlab")
+            self.spm_root = os.environ.get("SPM_ROOT")
+            if not self.spm_root:
+                raise ValueError("SPM_ROOT environment variable not set for MATLAB mode")
 
     def execute_script(
         self, script_path: Path, input_files: Optional[List[str]] = None
@@ -255,23 +264,36 @@ class CAT12Processor:
         try:
             logger.info(f"Executing CAT12 script: {script_path}")
 
-            # Prepare command
-            cat12_cmd = os.path.join(self.cat12_root, "cat_standalone.sh")
+            if self.use_standalone:
+                # Prepare command
+                cat12_cmd = os.path.join(self.cat12_root, "cat_standalone.sh")
 
-            # Build command with files FIRST (as per cat_standalone.sh usage)
-            cmd = [cat12_cmd]
+                # Build command with files FIRST (as per cat_standalone.sh usage)
+                cmd = [cat12_cmd]
 
-            # Add input files first if provided
-            if input_files:
-                cmd.extend(input_files)
-                logger.info(f"Processing {len(input_files)} input files")
+                # Add input files first if provided
+                if input_files:
+                    cmd.extend(input_files)
+                    logger.info(f"Processing {len(input_files)} input files")
 
-            # Then add options
-            cmd.extend(["-m", self.mcr_root, "-b", str(script_path)])
+                # Then add options
+                cmd.extend(["-m", self.mcr_root, "-b", str(script_path)])
+            else:
+                # MATLAB mode
+                script_dir = script_path.parent
+                script_name = script_path.stem
+                
+                # Build MATLAB command
+                # We add SPM and the script directory to the path, then run the script
+                matlab_cmd = f"addpath('{self.spm_root}'); spm('defaults','fmri'); addpath('{script_dir}'); {script_name}; exit;"
+                cmd = [self.matlab_exe, "-nodisplay", "-nosplash", "-nodesktop", "-r", matlab_cmd]
+                logger.info(f"Using MATLAB at {self.matlab_exe}")
 
             # Set up environment
             env = os.environ.copy()
-            env["LD_LIBRARY_PATH"] = self._get_ld_library_path()
+            if self.use_standalone:
+                env["LD_LIBRARY_PATH"] = self._get_ld_library_path()
+            
             if self.threads_per_job:
                 env["OMP_NUM_THREADS"] = str(self.threads_per_job)
             if not self.use_cuda:
@@ -534,6 +556,9 @@ class CAT12Processor:
 
     def _get_ld_library_path(self) -> str:
         """Get LD_LIBRARY_PATH for MATLAB Runtime."""
+        if not self.use_standalone:
+            return os.environ.get("LD_LIBRARY_PATH", "")
+
         mcr_paths = [
             f"{self.mcr_root}/runtime/glnxa64",
             f"{self.mcr_root}/bin/glnxa64",
@@ -554,20 +579,34 @@ class CAT12Processor:
         Returns:
             Dictionary with installation status checks
         """
-        status = {
-            "cat12_root_exists": (
-                os.path.exists(self.cat12_root) if self.cat12_root else False
-            ),
-            "mcr_root_exists": (
-                os.path.exists(self.mcr_root) if self.mcr_root else False
-            ),
-            "cat12_executable_exists": False,
-            "environment_variables_set": bool(self.cat12_root and self.mcr_root),
-        }
+        if self.use_standalone:
+            status = {
+                "cat12_root_exists": (
+                    os.path.exists(self.cat12_root) if self.cat12_root else False
+                ),
+                "mcr_root_exists": (
+                    os.path.exists(self.mcr_root) if self.mcr_root else False
+                ),
+                "cat12_executable_exists": False,
+                "environment_variables_set": bool(self.cat12_root and self.mcr_root),
+            }
 
-        if status["cat12_root_exists"]:
-            cat12_executable = os.path.join(self.cat12_root, "cat_standalone.sh")
-            status["cat12_executable_exists"] = os.path.exists(cat12_executable)
+            if status["cat12_root_exists"]:
+                cat12_executable = os.path.join(self.cat12_root, "cat_standalone.sh")
+                status["cat12_executable_exists"] = os.path.exists(cat12_executable)
+        else:
+            status = {
+                "spm_root_exists": (
+                    os.path.exists(self.spm_root) if self.spm_root else False
+                ),
+                "cat12_toolbox_exists": (
+                    os.path.exists(os.path.join(self.spm_root, "toolbox", "cat12"))
+                    if self.spm_root
+                    else False
+                ),
+                "matlab_exe_exists": shutil.which(self.matlab_exe) is not None,
+                "environment_variables_set": bool(self.spm_root and self.matlab_exe),
+            }
 
         return status
 

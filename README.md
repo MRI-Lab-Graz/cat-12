@@ -37,16 +37,25 @@ See `THIRD_PARTY_NOTICES.md` for details.
 
 ### 1. Installation
 
-Run the dedicated installation script:
+You can choose between the standalone version (no MATLAB license required) or using your existing MATLAB installation.
 
+#### Option A: Standalone (Recommended for servers)
 ```bash
 ./scripts/install_cat12_standalone.sh
 ```
 
-This script will:
-- Download and install CAT12 standalone from the official source
+#### Option B: Existing MATLAB (Recommended for local workstations/Macs)
+```bash
+./scripts/install_cat12_matlab.sh --matlab-path /Applications/MATLAB_R2023b.app/bin/matlab
+```
+*Or via Makefile:*
+```bash
+make install-matlab MATLAB_PATH=/Applications/MATLAB_R2023b.app/bin/matlab
+```
+
+These scripts will:
+- Download and install CAT12/SPM12
 - Set up a contained Python virtual environment and install Python dependencies
-- Install required BIDS and processing dependencies
 - Create all dependencies within the project directory (no system-wide changes)
 
 ### 2. Activate Environment (Optional)
@@ -134,6 +143,22 @@ Use `cat12_stats` to run longitudinal statistical analysis (e.g., VBM, Surface T
 - `--output`: Custom output directory (optional).
 - `--nohup`: Run in background (detached). Logs output to `cat12_stats_<timestamp>.log`.
 
+#### C. Post-Stats Reporting (`post_stats_report.py`)
+
+After running statistics, you can generate a comprehensive HTML report that summarizes significant results across multiple thresholds and correction methods.
+
+```bash
+# Generate report for a results directory
+./.venv/bin/python scripts/stats/post_stats_report.py /path/to/results/vbm/
+```
+
+**Features:**
+- **Multiple Thresholds**: Automatically reports results at $p < 0.01$, $p < 0.05$, and $p < 0.1$ (trend).
+- **Correction Variants**: Summarizes FWE-corrected, FDR-corrected, and Uncorrected results.
+- **Anatomical Mapping**: Automatically maps peak coordinates to brain regions using the **AAL3 atlas**.
+- **MNI Coordinates**: Provides exact peak locations for all significant clusters.
+- **Visual Summary**: Generates a clean, color-coded HTML table for easy interpretation.
+
 ## Directory Structure
 
 ```
@@ -146,8 +171,11 @@ bids-cat12-wrapper/
 │   └── processing_config.yaml     # Preprocessing configuration
 ├── scripts/                       # Source code
 │   ├── preprocessing/             # Preprocessing scripts (Python)
-│   ├── stats/                     # Stats scripts (Bash/MATLAB)
-│   └── install_cat12_standalone.sh
+│   ├── stats/                     # Stats scripts (Bash/MATLAB/Python)
+│   │   ├── post_stats_report.py   # HTML report generator
+│   │   └── summarize_tfce.py      # TFCE summary utility
+│   ├── install_cat12_standalone.sh
+│   └── install_cat12_matlab.sh    # Native MATLAB installer
 ├── stats/                         # Data & Results workspace
 │   ├── participants.tsv           # Example participants file
 │   ├── results/                   # Analysis results

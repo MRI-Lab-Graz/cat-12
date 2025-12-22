@@ -3,6 +3,11 @@
 
 .PHONY: help install test clean activate example dev-install lint format format-check
 
+# Optional MATLAB path for install-matlab
+ifdef MATLAB_PATH
+    MATLAB_PATH_FLAG = --matlab-path $(MATLAB_PATH)
+endif
+
 # Default target
 help:
 	@echo "CAT12 BIDS Pipeline - Available Commands"
@@ -10,6 +15,8 @@ help:
 	@echo ""
 	@echo "Setup and Installation:"
 	@echo "  install     - Install CAT12 standalone and Python dependencies"
+	@echo "  install-matlab - Install CAT12 for existing MATLAB installation"
+	@echo "                (Optional: MATLAB_PATH=/path/to/matlab)"
 	@echo "  test        - Run installation tests"
 	@echo "  activate    - Show how to activate the environment"
 	@echo ""
@@ -24,7 +31,7 @@ help:
 	@echo "  clean       - Clean temporary files"
 	@echo ""
 	@echo "To get started:"
-	@echo "  1. make install"
+	@echo "  1. make install (or make install-matlab)"
 	@echo "  2. make test"
 	@echo "  3. make activate"
 
@@ -33,6 +40,20 @@ install:
 	@echo "Installing CAT12 standalone and dependencies..."
 	@chmod +x scripts/install_cat12_standalone.sh
 	@./scripts/install_cat12_standalone.sh
+
+install-matlab:
+	@echo "Installing CAT12 for existing MATLAB..."
+	@chmod +x scripts/install_cat12_matlab.sh
+	@./scripts/install_cat12_matlab.sh $(MATLAB_PATH_FLAG)
+	@echo "Installing Python dependencies..."
+	@if [ -f ".venv/bin/activate" ]; then \
+		. .venv/bin/activate && \
+		uv pip install -r requirements.txt; \
+	else \
+		uv venv .venv && \
+		. .venv/bin/activate && \
+		uv pip install -r requirements.txt; \
+	fi
 
 # Test installation
 test:

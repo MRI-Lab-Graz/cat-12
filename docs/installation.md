@@ -32,8 +32,14 @@ The installer is designed to keep everything inside this repository:
 
 From the repo root:
 
+### Option A: Standalone (No MATLAB license required)
 ```bash
 ./scripts/install_cat12_standalone.sh
+```
+
+### Option B: Existing MATLAB (Uses your local MATLAB installation)
+```bash
+./scripts/install_cat12_matlab.sh
 ```
 
 That’s it. The wrappers (`./cat12_prepro`, `./cat12_stats`) will automatically activate `.venv` and source `.env`.
@@ -41,7 +47,8 @@ That’s it. The wrappers (`./cat12_prepro`, `./cat12_stats`) will automatically
 ### Alternative: Makefile
 
 ```bash
-make install
+make install         # For standalone
+make install-matlab  # For existing MATLAB
 make test
 ```
 

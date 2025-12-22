@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 # Repo-relative fallbacks (avoid hard-coded machine-specific paths)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPMROOT = str(REPO_ROOT / "external" / "cat12")
+DEFAULT_CAT12ROOT = str(REPO_ROOT / "external" / "matlab_tools" / "spm12" / "toolbox" / "cat12")
 
 
 def setup_logging(
@@ -461,9 +462,8 @@ class BIDSLongitudinalProcessor:
                     config_path if config_path else "",
                     "--spm-script",
                     os.path.join(
-                        os.environ.get("SPMROOT", DEFAULT_SPMROOT),
-                        "standalone",
-                        "cat_standalone_segment.m",
+                        os.environ.get("CAT12_ROOT", os.path.join(os.environ.get("SPMROOT", DEFAULT_SPMROOT), "standalone" if os.path.exists(os.path.join(os.environ.get("SPMROOT", DEFAULT_SPMROOT), "standalone")) else "")),
+                        "cat_standalone_segment.m" if not os.environ.get("CAT12_ROOT") else "standalone/cat_standalone_segment.m",
                     ),
                 ]
                 # Only write HTML for per-subject logs
@@ -1670,11 +1670,19 @@ def main(
         logger.info(
             f"{Fore.YELLOW}🧪 DRY RUN: Planning only (no CAT12 execution){Style.RESET_ALL}"
         )
+        cat12_root = os.environ.get("CAT12_ROOT", "")
         spm_root = os.environ.get("SPMROOT", "") or DEFAULT_SPMROOT
-        long_template = Path(spm_root) / "standalone" / "cat_standalone_segment_long.m"
-        cross_template = Path(spm_root) / "standalone" / "cat_standalone_segment.m"
+        
+        if cat12_root:
+            long_template = Path(cat12_root) / "standalone" / "cat_standalone_segment_long.m"
+            cross_template = Path(cat12_root) / "standalone" / "cat_standalone_segment.m"
+        else:
+            long_template = Path(spm_root) / "standalone" / "cat_standalone_segment_long.m"
+            cross_template = Path(spm_root) / "standalone" / "cat_standalone_segment.m"
 
         logger.info(f"SPMROOT: {spm_root}")
+        if cat12_root:
+            logger.info(f"CAT12_ROOT: {cat12_root}")
         logger.info(
             f"Templates: longitudinal={'OK' if long_template.exists() else 'MISSING'} ({long_template}), cross-sectional={'OK' if cross_template.exists() else 'MISSING'} ({cross_template})"
         )
@@ -1763,9 +1771,8 @@ def main(
                 config_path_str,
                 "--spm-script",
                 os.path.join(
-                    os.environ.get("SPMROOT", DEFAULT_SPMROOT),
-                    "standalone",
-                    "cat_standalone_segment.m",
+                    os.environ.get("CAT12_ROOT", os.path.join(os.environ.get("SPMROOT", DEFAULT_SPMROOT), "standalone" if os.path.exists(os.path.join(os.environ.get("SPMROOT", DEFAULT_SPMROOT), "standalone")) else "")),
+                    "cat_standalone_segment.m" if not os.environ.get("CAT12_ROOT") else "standalone/cat_standalone_segment.m",
                 ),
             ]
             sys.argv = ["generate_boilerplate.py"] + args
