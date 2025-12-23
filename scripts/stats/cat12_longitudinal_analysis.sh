@@ -228,6 +228,7 @@ P_UNC=$(get_ini_value "THRESHOLDING" "p_unc" "0.001")
 P_FWE=$(get_ini_value "THRESHOLDING" "p_fwe" "0.05")
 BOTH_DIRECTIONS=$(get_ini_value "THRESHOLDING" "both_directions" "true")
 LOG_SCALED=$(get_ini_value "THRESHOLDING" "log_scaled" "true")
+THRESH_CLUSTER_SIZE=$(get_ini_value "THRESHOLDING" "cluster_size" "")
 
 # Two-stage TFCE probe parameters (automatic, no CLI flag required)
 # initial_perm: quick probe run to estimate cc (default: 100)
@@ -1011,7 +1012,14 @@ if [[ "$DOUBLE_THRESHOLD" == "true" ]]; then
     if [[ "$BOTH_DIRECTIONS" == "true" ]]; then BOTH_MAT="true"; else BOTH_MAT="false"; fi
     if [[ "$LOG_SCALED" == "true" ]]; then LOG_MAT="true"; else LOG_MAT="false"; fi
 
-    run_matlab "warning('off','MATLAB:dispatcher:nameConflict'); warning('off','all'); set(0,'DefaultFigureVisible','off'); set(0,'DefaultFigureCreateFcn',@(h,ev)[]); $UTILS_PATH_CMD spm('defaults', 'FMRI'); spm_jobman('initcfg'); stats_dir='$OUTPUT_DIR'; varargin={'p_unc', $P_UNC, 'p_fwe', $P_FWE, 'both', $BOTH_MAT, 'log', $LOG_MAT}; fid=fopen('$THRESH_SCRIPT'); if fid==-1, error('Cannot open thresholding script'); end; txt=fread(fid,'*char')'; fclose(fid); txt=regexprep(txt,'^function[^\n]*\n',''); txt=regexprep(txt,'\nend\s*$',''); eval(txt);" 2>&1 | tee -a "$MATLAB_THRESH_LOG" || {
+    # Prefer THRESHOLDING.cluster_size; fall back to SCREENING.cluster_size when empty
+    if [[ -z "$THRESH_CLUSTER_SIZE" ]]; then
+        DT_CLUSTER="$CLUSTER_SIZE"
+    else
+        DT_CLUSTER="$THRESH_CLUSTER_SIZE"
+    fi
+
+    run_matlab "warning('off','MATLAB:dispatcher:nameConflict'); warning('off','all'); set(0,'DefaultFigureVisible','off'); set(0,'DefaultFigureCreateFcn',@(h,ev)[]); $UTILS_PATH_CMD spm('defaults', 'FMRI'); spm_jobman('initcfg'); stats_dir='$OUTPUT_DIR'; varargin={'p_unc', $P_UNC, 'p_fwe', $P_FWE, 'both', $BOTH_MAT, 'log', $LOG_MAT, 'cluster_size', $DT_CLUSTER}; fid=fopen('$THRESH_SCRIPT'); if fid==-1, error('Cannot open thresholding script'); end; txt=fread(fid,'*char')'; fclose(fid); txt=regexprep(txt,'^function[^\n]*\n',''); txt=regexprep(txt,'\nend\s*$',''); eval(txt);" 2>&1 | tee -a "$MATLAB_THRESH_LOG" || {
         echo "⚠️  Warning: Double thresholding failed (see $MATLAB_THRESH_LOG)"
     }
     echo ""

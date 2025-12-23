@@ -23,6 +23,7 @@ function cat12_threshold_maps(stats_dir, varargin)
     addParameter(p, 'both', true, @islogical);
     addParameter(p, 'log', true, @islogical);
     addParameter(p, 'contrast_list', [], @isnumeric);
+    addParameter(p, 'cluster_size', 0, @isnumeric); % optional extent threshold in voxels
     parse(p, stats_dir, varargin{:});
 
     stats_dir = p.Results.stats_dir;
@@ -31,6 +32,7 @@ function cat12_threshold_maps(stats_dir, varargin)
     both = p.Results.both;
     log_scaled = p.Results.log;
     contrast_list = p.Results.contrast_list;
+    cluster_k = p.Results.cluster_size;
 
     fprintf('\n%s\n', repmat('═', 1, 80));
     fprintf('CAT12 DOUBLE THRESHOLDING\n');
@@ -46,7 +48,8 @@ function cat12_threshold_maps(stats_dir, varargin)
     fprintf('  p (uncorrected):  %.3f\n', p_unc);
     fprintf('  p (FWE):          %.3f\n', p_fwe);
     fprintf('  Both directions:  %d\n', both);
-    fprintf('  Log-scaled:       %d\n\n', log_scaled);
+    fprintf('  Log-scaled:       %d\n', log_scaled);
+    fprintf('  Cluster size k:   %d\n\n', cluster_k);
 
     % Load SPM.mat to get T-maps
     load(spm_file);
@@ -112,8 +115,35 @@ function cat12_threshold_maps(stats_dir, varargin)
         matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.threshdesc.uncorr.thresh001 = 0.001;
     end
 
-    matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.inverse = 0;
-    matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.cluster.none = 1;
+    % Two-sided vs one-sided: CAT12 uses "inverse" flag to capture the opposite tail.
+    if both
+        matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.inverse = 1;
+    else
+        matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.inverse = 0;
+    end
+
+    % Cluster/FWE handling. If an FWE threshold is requested, prefer the CAT12
+    % fwe2 branch (voxel-wise FWE) and set non-isotropic smoothing flag.
+    if ~isempty(p_fwe) && p_fwe > 0
+        if abs(p_fwe - 0.05) < 1e-6
+            matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.cluster.fwe2.thresh05 = 0.05;
+        elseif abs(p_fwe - 0.01) < 1e-6
+            matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.cluster.fwe2.thresh01 = 0.01;
+        elseif abs(p_fwe - 0.001) < 1e-6
+            matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.cluster.fwe2.thresh001 = 0.001;
+        else
+            fprintf('Warning: p_fwe = %.4f not explicitly supported; using 0.05.\n', p_fwe);
+            matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.cluster.fwe2.thresh05 = 0.05;
+        end
+        matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.cluster.fwe2.noniso = 1;
+    else
+        % Uncorrected cluster extent
+        if isempty(cluster_k) || cluster_k <= 0
+            matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.cluster.none = 1;
+        else
+            matlabbatch{1}.spm.tools.cat.tools.T2x.conversion.cluster.size = cluster_k;
+        end
+    end
     matlabbatch{1}.spm.tools.cat.tools.T2x.atlas = 'None';
 
     % Run the batch

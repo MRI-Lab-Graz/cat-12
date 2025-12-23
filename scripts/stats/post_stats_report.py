@@ -136,8 +136,13 @@ def plot_surface_to_base64(stat_map_path, mesh_lh, mesh_rh, bg_lh_data, bg_rh_da
         print(f"Warning: Could not plot surface {stat_map_path}: {e}")
         return None
 
-def generate_report(results_dir, output_html):
+def generate_report(results_dir, output_html, filter_mode="all"):
     print(f"Generating post-stats report for: {results_dir}")
+    filter_mode = (filter_mode or "all").lower()
+    if filter_mode not in {"all", "tfce", "spmt", "double_threshold"}:
+        print(f"Warning: Unknown filter_mode '{filter_mode}', defaulting to 'all'.")
+        filter_mode = "all"
+    print(f"Filter mode: {filter_mode}")
     
     if not os.path.isdir(results_dir):
         print(f"Error: {results_dir} is not a directory.")
@@ -171,7 +176,7 @@ def generate_report(results_dir, output_html):
             print(f"Warning: Could not read SPM.mat: {e}")
 
     # Define Atlases
-    cat12_base = "/Volumes/Evo/software/cat-12/external/cat12/spm12.app/Contents/Resources/spm12_mcr/Users/gaser/spm/spm12"
+    cat12_base = "/data/local/software/cat-12/external/cat12/spm12_mcr/home/gaser/gaser/spm/spm12"
     atlases = []
     bg_lh_data = None
     bg_rh_data = None
@@ -237,6 +242,9 @@ def generate_report(results_dir, output_html):
 
     # Find all relevant files
     for corr_name, patterns in correction_patterns.items():
+        if filter_mode == "double_threshold" and corr_name != "FWE":
+            continue
+
         files = []
         for p in patterns:
             files.extend(glob.glob(os.path.join(results_dir, p)))
@@ -245,6 +253,40 @@ def generate_report(results_dir, output_html):
         files = sorted(list(set(files)))
         
         for f in files:
+            base = os.path.basename(f)
+            if filter_mode == "tfce" and "TFCE" not in base:
+                continue
+            if filter_mode == "spmt" and "TFCE" in base:
+                continue
+            
+            # Double-threshold specific parsing
+            cluster_size = None
+            is_bidirectional = False
+            actual_p_fwe = None
+            if "pkFWE" in base:
+                k_match = re.search(r'_k(\d+)_', base)
+                if k_match:
+                    cluster_size = int(k_match.group(1))
+                
+                p_fwe_match = re.search(r'pkFWE(\d+)', base)
+                if p_fwe_match:
+                    actual_p_fwe = int(p_fwe_match.group(1)) / 100.0
+
+                if "_bi" in base:
+                    is_bidirectional = True
+                
+                if filter_mode == "double_threshold":
+                    display_corr = "Double Threshold"
+                else:
+                    display_corr = corr_name
+            else:
+                if filter_mode == "double_threshold":
+                    continue
+                # Prevent pkFWE files from appearing in Uncorrected/FDR lists
+                if "pkFWE" in base:
+                    continue
+                display_corr = corr_name
+
             basename = os.path.basename(f)
             con_num = None
             
@@ -258,9 +300,19 @@ def generate_report(results_dir, output_html):
             
             # If not found, try to match contrast name from logP_ContrastName_...
             if con_num is None:
+                # CAT12 thresholding tool replaces spaces with underscores but keeps other chars
                 for num, name in contrast_names.items():
-                    clean_name = name.replace(' ', '_').replace(':', '_').replace('-', '_')
-                    if clean_name in basename:
+                    cat12_style_name = name.replace(' ', '_')
+                    if cat12_style_name in basename:
+                        con_num = num
+                        break
+            
+            # Fallback: try even more aggressive matching if still not found
+            if con_num is None:
+                for num, name in contrast_names.items():
+                    clean_name = re.sub(r'[^a-zA-Z0-9]', '_', name)
+                    clean_basename = re.sub(r'[^a-zA-Z0-9]', '_', basename)
+                    if clean_name in clean_basename:
                         con_num = num
                         break
             
@@ -294,6 +346,14 @@ def generate_report(results_dir, output_html):
             
             # For each threshold
             for p_val, log_p_thresh, p_label in thresholds:
+                # If double threshold, we only want to show the result at the actual FWE level used
+                if actual_p_fwe is not None:
+                    if abs(p_val - actual_p_fwe) > 0.001:
+                        continue
+                    p_label = f"FWE (p < {actual_p_fwe})"
+                    # Use a minimal threshold for already-thresholded files
+                    log_p_thresh = 0.0001 
+
                 mask = (~np.isnan(data)) & (data >= log_p_thresh)
                 sig_elements = np.sum(mask)
                 
@@ -338,11 +398,21 @@ def generate_report(results_dir, output_html):
                     elif stat_type == "F":
                         direction = "Bidirectional (F)"
                     
+                    # Check if the map direction matches the contrast intent
+                    if filter_mode == "double_threshold":
+                        if not is_bidirectional:
+                            # If it's a one-sided map, ensure it matches the contrast name
+                            if direction == "Positive" and "_bi" in base:
+                                continue # Should not happen with current naming
+                        else:
+                            direction = "Two-sided"
+                    
                     report_data.append({
                         'id': f"con_{con_num}_{corr_name}_{int(p_val*100)}",
                         'con_num': con_num,
                         'con_name': con_name,
-                        'correction': corr_name,
+                        'correction': display_corr,
+                        'orig_correction': corr_name,
                         'p_thresh': p_val,
                         'log_p_thresh': log_p_thresh,
                         'p_label': p_label,
@@ -351,8 +421,9 @@ def generate_report(results_dir, output_html):
                         'peak_stat': float(peak_stat),
                         'stat_type': stat_type,
                         'direction': direction,
-                        'peak_mni': [round(c, 2) for c in peak_mni] if not is_surface else "N/A",
+                        'peak_mni': [float(round(c, 2)) for c in peak_mni] if not is_surface else "N/A",
                         'regions': region_mappings,
+                        'cluster_size': cluster_size,
                         'file_path': f
                     })
 
@@ -390,6 +461,7 @@ def generate_report(results_dir, output_html):
     <!DOCTYPE html>
     <html>
     <head>
+        <meta charset="UTF-8">
         <title>CAT12 Interactive Post-Stats Report</title>
         <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 40px; background-color: #f8f9fa; color: #333; }
@@ -416,6 +488,7 @@ def generate_report(results_dir, output_html):
             .badge-fwe { background-color: #dc3545; color: white; }
             .badge-fdr { background-color: #ffc107; color: #212529; }
             .badge-unc { background-color: #6c757d; color: white; }
+            .badge-dou { background-color: #6f42c1; color: white; }
             
             .dir-pos { color: #28a745; font-weight: bold; }
             .dir-neg { color: #dc3545; font-weight: bold; }
@@ -430,7 +503,7 @@ def generate_report(results_dir, output_html):
         
         {% if not has_tfce %}
         <div class="warning-banner">
-            ⚠️ No TFCE results found in this directory. Showing standard statistic maps if available.
+            [!] No TFCE results found in this directory. Showing standard statistic maps if available.
         </div>
         {% endif %}
 
@@ -465,6 +538,7 @@ def generate_report(results_dir, output_html):
                     <option value="FWE">FWE</option>
                     <option value="FDR">FDR</option>
                     <option value="Uncorrected">Uncorrected</option>
+                    <option value="Double Threshold">Double Threshold</option>
                 </select>
             </div>
             <div class="control-group">
@@ -512,7 +586,12 @@ def generate_report(results_dir, output_html):
                     onclick="selectRow(this)">
                     <td>{{ row.con_num }}</td>
                     <td>{{ row.con_name }}</td>
-                    <td><span class="badge badge-{{ row.correction.lower()[:3] }}">{{ row.correction }}</span></td>
+                    <td>
+                        <span class="badge badge-{{ row.correction.lower()[:3] }}">{{ row.correction }}</span>
+                        {% if row.cluster_size %}
+                        <br><small>k > {{ row.cluster_size }}</small>
+                        {% endif %}
+                    </td>
                     <td>{{ row.p_label }}</td>
                     <td class="dir-{{ row.direction.lower()[:3] }}">{{ row.direction }}</td>
                     <td>{{ row.sig_voxels }}</td>
@@ -608,10 +687,12 @@ def generate_report(results_dir, output_html):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python post_stats_report.py <results_dir> <output_html>")
+        print("Usage: python post_stats_report.py <results_dir> <output_html> [filter_mode]")
+        print("  filter_mode: all | tfce | spmt | double_threshold")
         sys.exit(1)
     
     res_dir = sys.argv[1]
     out_html = sys.argv[2]
+    filt = sys.argv[3] if len(sys.argv) > 3 else "all"
     
-    generate_report(res_dir, out_html)
+    generate_report(res_dir, out_html, filt)
