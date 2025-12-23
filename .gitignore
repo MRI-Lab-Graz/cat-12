@@ -10,6 +10,7 @@ demo/
 # C extensions
 *.so
 spm*.ps
+participants.tsv
 
 # Distribution / packaging
 .Python
