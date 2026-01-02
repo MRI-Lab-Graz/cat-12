@@ -215,20 +215,7 @@ SKIP_SCREENING=$(get_ini_value "SCREENING" "skip_screening" "false")
 
 N_PERM=$(get_ini_value "TFCE" "n_perm" "5000")
 PILOT_MODE=$(get_ini_value "TFCE" "pilot_mode" "false")
-TFCE_ENABLED=$(get_ini_value "TFCE" "enabled" "true")
-if [[ "$TFCE_ENABLED" == "false" ]]; then
-    NO_TFCE=true
-else
-    NO_TFCE=false
-fi
-
-# Double thresholding options
-DOUBLE_THRESHOLD=$(get_ini_value "THRESHOLDING" "double_threshold" "false")
-P_UNC=$(get_ini_value "THRESHOLDING" "p_unc" "0.001")
-P_FWE=$(get_ini_value "THRESHOLDING" "p_fwe" "0.05")
-BOTH_DIRECTIONS=$(get_ini_value "THRESHOLDING" "both_directions" "true")
-LOG_SCALED=$(get_ini_value "THRESHOLDING" "log_scaled" "true")
-THRESH_CLUSTER_SIZE=$(get_ini_value "THRESHOLDING" "cluster_size" "")
+NO_TFCE=false
 
 # Two-stage TFCE probe parameters (automatic, no CLI flag required)
 # initial_perm: quick probe run to estimate cc (default: 100)
@@ -352,11 +339,6 @@ print_help() {
     echo "  --pilot                 Quick test mode (100 permutations)"
     echo "  --skip-screening        Run TFCE on all contrasts (not recommended)"
     echo "  --no-tfce               Stop after screening (skip TFCE correction)"
-    echo ""
-    echo "THRESHOLDING OPTIONS:"
-    echo "  --double-threshold      Enable CAT12 double thresholding (fast)"
-    echo "  --p-unc <p>             Uncorrected p-value threshold (default: 0.001)"
-    echo "  --p-fwe <p>             FWE corrected p-value threshold (default: 0.05)"
     echo ""
     echo "SCREENING OPTIONS:"
     echo "  --uncorrected-p <p>     P-value threshold (default: 0.001)"
@@ -486,18 +468,6 @@ while [[ $# -gt 0 ]]; do
             NO_TFCE=true
             shift
             ;;
-        --double-threshold)
-            DOUBLE_THRESHOLD=true
-            shift
-            ;;
-        --p-unc)
-            P_UNC="$2"
-            shift 2
-            ;;
-        --p-fwe)
-            P_FWE="$2"
-            shift 2
-            ;;
         --cluster-size)
             CLUSTER_SIZE="$2"
             shift 2
@@ -582,11 +552,6 @@ echo -e "  Permutations:       $N_PERM"
 echo -e "  Pilot mode:         $PILOT_MODE"
 echo -e "  Skip screening:     $SKIP_SCREENING"
 echo -e "  Parallel jobs:      $N_JOBS"
-echo ""
-echo -e "${BOLD}${BLUE}Thresholding:${NC}"
-echo -e "  Double threshold:   $DOUBLE_THRESHOLD"
-echo -e "  p (uncorrected):    $P_UNC"
-echo -e "  p (FWE):            $P_FWE"
 echo ""
 echo -e "${BOLD}${BLUE}Options:${NC}"
 echo -e "  Force clean:        $FORCE"
@@ -995,36 +960,6 @@ run_matlab "warning('off','MATLAB:dispatcher:nameConflict'); warning('off','all'
 echo "✓ Contrasts added"
 echo ""
 
-# ============================================================================
-# Step 4b: Double Thresholding (Optional)
-# ============================================================================
-
-if [[ "$DOUBLE_THRESHOLD" == "true" ]]; then
-    echo "┌────────────────────────────────────────────────────────────────────────┐"
-    echo "│ STEP 4b: Double Thresholding (CAT12)                                  │"
-    echo "└────────────────────────────────────────────────────────────────────────┘"
-    echo ""
-    
-    MATLAB_THRESH_LOG="$LOG_DIR/matlab_thresholding.log"
-    THRESH_SCRIPT="$STATS_DIR/utils/cat12_threshold_maps.m"
-    
-    # Convert bash boolean to MATLAB boolean
-    if [[ "$BOTH_DIRECTIONS" == "true" ]]; then BOTH_MAT="true"; else BOTH_MAT="false"; fi
-    if [[ "$LOG_SCALED" == "true" ]]; then LOG_MAT="true"; else LOG_MAT="false"; fi
-
-    # Prefer THRESHOLDING.cluster_size; fall back to SCREENING.cluster_size when empty
-    if [[ -z "$THRESH_CLUSTER_SIZE" ]]; then
-        DT_CLUSTER="$CLUSTER_SIZE"
-    else
-        DT_CLUSTER="$THRESH_CLUSTER_SIZE"
-    fi
-
-    run_matlab "warning('off','MATLAB:dispatcher:nameConflict'); warning('off','all'); set(0,'DefaultFigureVisible','off'); set(0,'DefaultFigureCreateFcn',@(h,ev)[]); $UTILS_PATH_CMD spm('defaults', 'FMRI'); spm_jobman('initcfg'); stats_dir='$OUTPUT_DIR'; varargin={'p_unc', $P_UNC, 'p_fwe', $P_FWE, 'both', $BOTH_MAT, 'log', $LOG_MAT, 'cluster_size', $DT_CLUSTER}; fid=fopen('$THRESH_SCRIPT'); if fid==-1, error('Cannot open thresholding script'); end; txt=fread(fid,'*char')'; fclose(fid); txt=regexprep(txt,'^function[^\n]*\n',''); txt=regexprep(txt,'\nend\s*$',''); eval(txt);" 2>&1 | tee -a "$MATLAB_THRESH_LOG" || {
-        echo "⚠️  Warning: Double thresholding failed (see $MATLAB_THRESH_LOG)"
-    }
-    echo ""
-fi
-
 # Verify contrasts were written to disk. If none found, fail early with diagnostics.
 echo "Verifying contrast files written to: $OUTPUT_DIR"
 shopt -s nullglob
@@ -1219,9 +1154,6 @@ python3 "$STATS_DIR/utils/generate_html_report.py" \
     --n-perm "$N_PERM" \
     --cluster-size "$CLUSTER_SIZE" \
     --uncorrected-p "$UNCORRECTED_P" \
-    --double-threshold "$DOUBLE_THRESHOLD" \
-    --p-unc "$P_UNC" \
-    --p-fwe "$P_FWE" \
     --start-time "$PIPELINE_START_TIME" || {
         echo "⚠️  Warning: HTML report generation failed"
     }

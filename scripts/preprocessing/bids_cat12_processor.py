@@ -124,7 +124,11 @@ class BIDSLongitudinalProcessor:
     """Main class for processing BIDS longitudinal datasets with CAT12."""
 
     def __init__(
-        self, bids_dir: Path, output_dir: Path, config_file: Optional[Path] = None
+        self,
+        bids_dir: Path,
+        output_dir: Path,
+        config_file: Optional[Path] = None,
+        validate: bool = True,
     ):
         """
         Initialize the processor.
@@ -133,6 +137,7 @@ class BIDSLongitudinalProcessor:
             bids_dir: Path to BIDS dataset
             output_dir: Path for outputs (derivatives)
             config_file: Optional configuration file
+            validate: Whether to validate BIDS structure
         """
         self.bids_dir = Path(bids_dir)
         self.output_dir = Path(output_dir)
@@ -140,6 +145,10 @@ class BIDSLongitudinalProcessor:
 
         # Load configuration
         self.config = self._load_config()
+        
+        # Override validation setting if explicitly provided
+        if not validate:
+            self.config.setdefault("bids", {})["validate"] = False
 
         # Initialize BIDS layout
         self.layout: Optional[BIDSLayout] = None
@@ -245,7 +254,7 @@ class BIDSLongitudinalProcessor:
             removed_size = 0
 
             for db_file in db_files:
-                if db_file.stat().st_mtime < cutoff_time:
+                if db_file.is_file() and db_file.stat().st_mtime < cutoff_time:
                     size = db_file.stat().st_size
                     db_file.unlink()
                     removed_count += 1
@@ -499,6 +508,38 @@ class BIDSLongitudinalProcessor:
         except Exception as e:
             logger.error(f"Error generating quality report for {subject}: {e}")
 
+    def _is_subject_complete(self, subject: str) -> bool:
+        """
+        Check if a subject has already been successfully processed.
+        
+        A subject is considered complete if:
+        1. The output directory contains segmented MRI files (mwp1*)
+        2. AND if processing_summary.json exists, it marks the subject as successful.
+        """
+        subject_dir = self.output_dir / f"sub-{subject}"
+        
+        # 1. Check for vital output files (GM segmentation)
+        # We check in all subdirectories as CAT12 might have different structures
+        gm_files = list(subject_dir.glob("**/mri/mwp1*.nii"))
+        if not gm_files:
+            return False
+            
+        # 2. Check processing_summary.json if it exists
+        summary_file = self.output_dir / "processing_summary.json"
+        if summary_file.exists():
+            try:
+                with open(summary_file, "r") as f:
+                    summary = json.load(f)
+                    results = summary.get("results", {})
+                    # If it's explicitly marked as False, it's not complete
+                    if results.get(subject) is False:
+                        return False
+            except Exception:
+                # If summary is corrupt, rely on file existence
+                pass
+        
+        return True
+
     def process_all_subjects(
         self,
         participant_labels: Optional[List[str]] = None,
@@ -512,6 +553,7 @@ class BIDSLongitudinalProcessor:
         subjects_dict: Optional[Dict[str, List[str]]] = None,
         cli_args: Optional[str] = None,
         config_path: Optional[str] = None,
+        skip_existing: bool = False,
     ) -> Dict[str, bool]:
         """
         Process all subjects in the dataset with specified stages.
@@ -557,22 +599,53 @@ class BIDSLongitudinalProcessor:
         subject_items = list(all_subjects.items())
 
         if run_preproc:
+            # Filter out already processed subjects if skip_existing is True
+            if skip_existing:
+                original_count = len(subject_items)
+                subject_items = [
+                    (subj, sess)
+                    for subj, sess in subject_items
+                    if not self._is_subject_complete(subj)
+                ]
+                skipped_count = original_count - len(subject_items)
+                if skipped_count > 0:
+                    logger.info(
+                        f"{Fore.YELLOW}⏭️  Skipping {skipped_count} already processed subjects{Style.RESET_ALL}"
+                    )
+                    # Initialize results for skipped subjects
+                    for subj, _ in all_subjects.items():
+                        if self._is_subject_complete(subj):
+                            results[subj] = True
+
+            if not subject_items:
+                logger.info(f"{Fore.GREEN}✅ All subjects already processed. Nothing to do.{Style.RESET_ALL}")
+                # If all were skipped, we still need to return the results for all of them
+                if not results:
+                    for subj in all_subjects:
+                        results[subj] = True
+                return results
+
             num_workers = max(1, int(self.config["cat12"].get("parallel_jobs", 1)))
             if num_workers > 1 and len(subject_items) > 1:
                 logger.info(
                     f"Running preprocessing with up to {num_workers} parallel jobs"
                 )
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                    future_map = {
-                        executor.submit(
+                    future_map = {}
+                    for subject, sessions in subject_items:
+                        # Stagger job submission to avoid MCR cache collisions
+                        import time
+                        time.sleep(1)
+                        
+                        future = executor.submit(
                             self.process_subject,
                             subject,
                             sessions,
                             cli_args,
                             config_path,
-                        ): subject
-                        for subject, sessions in subject_items
-                    }
+                        )
+                        future_map[future] = subject
+                        
                     with tqdm(
                         total=len(future_map), desc="Processing subjects"
                     ) as progress:
@@ -590,6 +663,11 @@ class BIDSLongitudinalProcessor:
                 for subject, sessions in tqdm(
                     subject_items, desc="Processing subjects"
                 ):
+                    # Add a small delay between starting jobs to reduce I/O spikes
+                    import time
+                    if subject_items.index((subject, sessions)) > 0:
+                        time.sleep(2)
+                        
                     success = self.process_subject(
                         subject, sessions, cli_args, config_path
                     )
@@ -1176,6 +1254,11 @@ class BIDSLongitudinalProcessor:
     is_flag=True,
     help="Plan and validate inputs without executing CAT12 (no processing is performed)",
 )
+@click.option(
+    "--skip-existing",
+    is_flag=True,
+    help="Skip subjects that have already been successfully processed",
+)
 def main(
     bids_dir: str,
     output_dir: Path,
@@ -1203,6 +1286,7 @@ def main(
     cross: bool,
     nohup: bool,
     dry_run: bool,
+    skip_existing: bool,
 ) -> None:
     """
     CAT12 BIDS App for structural MRI preprocessing and analysis.
@@ -1260,6 +1344,9 @@ def main(
 
       # Auto parallel jobs
       cat12_prepro /data/bids /data/derivatives participant --preproc --n-jobs auto
+
+      # Restart processing, skipping already finished subjects
+      cat12_prepro /data/bids /data/derivatives participant --preproc --skip-existing
 
       # Run in background (detached from terminal)
       cat12_prepro /data/bids /data/derivatives participant --preproc --qa --tiv --n-jobs auto --nohup
@@ -1518,7 +1605,10 @@ def main(
 
     # Initialize processor
     processor = BIDSLongitudinalProcessor(
-        bids_dir=resolved_bids_dir, output_dir=output_dir, config_file=config
+        bids_dir=resolved_bids_dir,
+        output_dir=output_dir,
+        config_file=config,
+        validate=not no_validate,
     )
     assert processor.layout is not None
 
@@ -1528,11 +1618,15 @@ def main(
         import psutil
 
         total_gb = psutil.virtual_memory().total / (1024**3)
-        reserved_gb = 16
-        per_job_gb = 4
+        reserved_gb = 24  # Increased reservation for system and overhead
+        per_job_gb = 6    # Increased per-job memory estimate for safety
         max_jobs = max(1, int((total_gb - reserved_gb) // per_job_gb))
+        
+        # Cap at 12 jobs to avoid I/O bottlenecks and excessive concurrency
+        max_jobs = min(max_jobs, 12)
+        
         print(
-            f"[AUTO] Detected {total_gb:.1f} GB RAM, reserving {reserved_gb} GB for system, running {max_jobs} parallel CAT12 jobs."
+            f"[AUTO] Detected {total_gb:.1f} GB RAM, reserving {reserved_gb} GB for system, running {max_jobs} parallel CAT12 jobs (capped at 12)."
         )
         final_n_jobs = max_jobs
     else:
@@ -1651,12 +1745,22 @@ def main(
 
     if pilot:
         if longitudinal_subjects:
-            pilot_subject = random.choice(list(longitudinal_subjects.keys()))  # nosec
+            # If skip_existing is True, only pick from subjects that aren't complete
+            if skip_existing:
+                available_subjects = {
+                    s: sess for s, sess in longitudinal_subjects.items()
+                    if not processor._is_subject_complete(s)
+                }
+                if not available_subjects:
+                    logger.info(f"{Fore.GREEN}✅ All subjects already processed. Pilot mode has nothing to do.{Style.RESET_ALL}")
+                    sys.exit(0)
+                pilot_subject = random.choice(list(available_subjects.keys()))
+                longitudinal_subjects = {pilot_subject: available_subjects[pilot_subject]}
+            else:
+                pilot_subject = random.choice(list(longitudinal_subjects.keys()))  # nosec
+                longitudinal_subjects = {pilot_subject: longitudinal_subjects[pilot_subject]}
+            
             participant_labels = [f"sub-{pilot_subject}"]
-            # Filter longitudinal_subjects to only include the pilot subject
-            longitudinal_subjects = {
-                pilot_subject: longitudinal_subjects[pilot_subject]
-            }
             logger.info(
                 f"{Fore.YELLOW}🎯 Pilot mode enabled: selected participant sub-{pilot_subject}{Style.RESET_ALL}"
             )
@@ -1743,6 +1847,7 @@ def main(
                 subjects_dict=longitudinal_subjects,
                 cli_args=cli_args_str,
                 config_path=config_path_str,
+                skip_existing=skip_existing,
             )
             # After all subjects processed, generate main boilerplate summary (Markdown)
             from generate_boilerplate import main as boilerplate_main

@@ -293,6 +293,12 @@ class CAT12Processor:
             env = os.environ.copy()
             if self.use_standalone:
                 env["LD_LIBRARY_PATH"] = self._get_ld_library_path()
+                
+                # Set unique MCR cache directory per process to avoid collisions
+                # Use the script's parent directory (subject output dir) for the cache
+                mcr_cache_dir = script_path.parent / ".mcr_cache"
+                mcr_cache_dir.mkdir(parents=True, exist_ok=True)
+                env["MCR_CACHE_ROOT"] = str(mcr_cache_dir)
             
             if self.threads_per_job:
                 env["OMP_NUM_THREADS"] = str(self.threads_per_job)
@@ -403,15 +409,26 @@ class CAT12Processor:
                 if remaining_stderr:
                     stderr_f.write(remaining_stderr)
 
-            if process.returncode == 0:
+            # Check for failure strings in the log files even if return code is 0
+            # (Some standalone versions don't return non-zero on job failure)
+            execution_failed = False
+            if stdout_log.exists():
+                with open(stdout_log, "r") as f:
+                    content = f.read()
+                    if "Execution failed" in content or "Error using spm_jobman" in content or "No valid job" in content:
+                        execution_failed = True
+                        logger.error(f"{Fore.RED}❌ CAT12 reported execution failure in logs{Style.RESET_ALL}")
+
+            if process.returncode == 0 and not execution_failed:
                 logger.info(
                     f"{Fore.GREEN}✅ CAT12 processing completed successfully{Style.RESET_ALL}"
                 )
                 return True
             else:
-                logger.error(
-                    f"{Fore.RED}❌ CAT12 processing failed with return code {process.returncode}{Style.RESET_ALL}"
-                )
+                if not execution_failed:
+                    logger.error(
+                        f"{Fore.RED}❌ CAT12 processing failed with return code {process.returncode}{Style.RESET_ALL}"
+                    )
                 if stderr_log.exists() and stderr_log.stat().st_size > 0:
                     with open(stderr_log, "r") as f:
                         logger.error(

@@ -10,13 +10,13 @@
 % This template is used to generate subject-specific processing scripts
 %
 % Template variables (replaced by Python script):
-% {SUBJECT_ID} - Subject identifier
-% {T1W_FILES} - Cell array of T1w file paths
-% {OUTPUT_DIR} - Output directory path
-% {LONGITUDINAL} - Boolean for longitudinal processing
-% {SURFACE_PROCESSING} - Boolean for surface processing
-% {VOLUME_PROCESSING} - Boolean for volume processing
-% {QUALITY_CHECK} - Boolean for quality assessment
+% SUBJECT_ID - Subject identifier
+% T1W_FILES - Cell array of T1w file paths
+% OUTPUT_DIR - Output directory path
+% LONGITUDINAL - Boolean for longitudinal processing
+% SURFACE_PROCESSING - Boolean for surface processing
+% VOLUME_PROCESSING - Boolean for volume processing
+% QUALITY_CHECK - Boolean for quality assessment
 
 %% Initialize SPM and CAT12
 fprintf('Initializing SPM and CAT12...\n');
