@@ -1617,16 +1617,30 @@ def main(
     if isinstance(n_jobs, str) and n_jobs == "auto":
         import psutil
 
+        # Use AVAILABLE memory to account for other background processes
+        available_gb = psutil.virtual_memory().available / (1024**3)
         total_gb = psutil.virtual_memory().total / (1024**3)
-        reserved_gb = 24  # Increased reservation for system and overhead
-        per_job_gb = 6    # Increased per-job memory estimate for safety
-        max_jobs = max(1, int((total_gb - reserved_gb) // per_job_gb))
         
-        # Cap at 12 jobs to avoid I/O bottlenecks and excessive concurrency
-        max_jobs = min(max_jobs, 12)
+        # We want to leave some buffer from the available pool
+        buffer_gb = 8 
+        per_job_gb = 6    # CAT12 peak memory estimate
+        
+        # Calculate jobs based on available RAM
+        mem_jobs = max(1, int((available_gb - buffer_gb) // per_job_gb))
+        
+        # Also consider CPU cores to avoid thrashing
+        cpu_count = psutil.cpu_count(logical=False) or 4
+        cpu_jobs = max(1, cpu_count - 2) # Leave 2 cores for system/other tasks
+        
+        # Final jobs is the minimum of RAM-based, CPU-based, and a hard cap of 12
+        max_jobs = min(mem_jobs, cpu_jobs, 12)
         
         print(
-            f"[AUTO] Detected {total_gb:.1f} GB RAM, reserving {reserved_gb} GB for system, running {max_jobs} parallel CAT12 jobs (capped at 12)."
+            f"[AUTO] System: {total_gb:.1f}GB Total, {available_gb:.1f}GB Available RAM. "
+            f"Detected {cpu_count} physical cores."
+        )
+        print(
+            f"[AUTO] Scaling to {max_jobs} parallel jobs (RAM-limit: {mem_jobs}, CPU-limit: {cpu_jobs}, Hard-cap: 12)."
         )
         final_n_jobs = max_jobs
     else:
